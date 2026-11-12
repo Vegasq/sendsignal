@@ -91,7 +91,11 @@ export default function Sidebar({
       </div>
 
       {adding && (
-        <AddFeedDialog onClose={() => setAdding(false)} onAdded={(url, folder) => { setAdding(false); onAddFeed(url, folder); }} />
+        <AddFeedDialog
+          folders={state.folders}
+          onClose={() => setAdding(false)}
+          onAdded={(url, folder) => { setAdding(false); onAddFeed(url, folder); }}
+        />
       )}
       {importing && (
         <ImportDialog onClose={() => setImporting(false)} onImported={() => setImporting(false)} />
