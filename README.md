@@ -1,0 +1,101 @@
+# sscc — a Google Reader-style RSS reader
+
+A feed reader that runs **entirely in the browser**, has **no backend**, and is
+deployed to **GitHub Pages**. Subscriptions, read state, folders, and search are
+all stored locally on the machine that opens the app.
+
+## Design constraints (and what they force)
+
+| Constraint | Consequence |
+|---|---|
+| No backend | No server can fetch feeds for us. Browsers block cross-origin `fetch` to feed URLs (CORS). |
+| GitHub Pages | Pure static output (`dist/`). Deploy = push a branch or a GitHub Action artifact. |
+| Runs in browser | All state lives in `localStorage`. Full article bodies are **not** persisted (5 MB cap) — only lightweight metadata is. |
+
+### The CORS problem — and how we solve it
+
+A feed URL like `https://example.com/rss` cannot be `fetch`ed directly from a
+Pages-hosted SPA; the feed host won't send `Access-Control-Allow-Origin`. We
+route feed fetches through a **pluggable CORS proxy** (`src/lib/proxy.js`).
+A public proxy is used by default so the app works out of the box; a
+user-supplied proxy can be set in Settings. This is the one third-party
+dependency the architecture accepts, and it is isolated behind a single module
+so it can be swapped (or replaced by a self-hosted proxy / GitHub Actions
+worker) later without touching the UI.
+
+Feed content is fetched as text and parsed client-side with `DOMParser`
+(`src/lib/feedParser.js`), supporting **RSS 2.0, Atom, and RDF/RSS 1.0**.
+
+## Architecture
+
+```
+Browser SPA (React + Vite static build)
+│
+├─ proxy.js        fetch feed URL  -> raw XML text  (swap the transport)
+├─ feedParser.js   XML text        -> normalized feed + items
+├─ store.js        feeds/folders/read-ids  <-> localStorage (persist lightweight state)
+│
+└─ components/
+   ├─ Sidebar.jsx      folders + feed list (+ counts)
+   ├─ ArticleList.jsx  items for selected feed(s), unread badge, mark-all-read
+   ├─ Reader.jsx       full article view, mark read/unread, prev/next
+   ├─ AddFeedDialog.jsx  subscribe by URL
+   ├─ ImportDialog.jsx   OPML import / export
+   ├─ SettingsDialog.jsx theme + custom proxy settings
+   └─ ContextMenu.jsx    right-click feed actions (move/unsubscribe)
+```
+
+**State model** (`store.js`):
+- `feeds: [{id, url, title, folder, lastUpdated}]`
+- `folders: string[]`
+- `read: Set<itemId>` persisted as a JSON array
+- `items` (full article bodies) kept **in memory only**; re-fetched on next load.
+
+## Features (MVP — implemented)
+
+- Subscribe by feed URL (auto-detects RSS/Atom/RDF).
+- OPML import/export (Google Reader / Feedly migration).
+- Folders to group feeds.
+- Unread counts per feed; mark individual or all as read.
+- Full-text reader with prev/next and in-reader read toggles.
+- Full-text search across subscribed feeds.
+- Dark mode; all preferences persisted locally.
+- Offline after first load (static assets + in-memory cache).
+
+## Roadmap
+
+| Priority | Item | Notes |
+|---|---|---|
+| MVP | Feed fetch/parse, folders, read state, search | done |
+| P2 | Self-hosted proxy option + `:8080` dev proxy | removes public-proxy rate limits |
+| P2 | IndexedDB for article bodies | persist full content across reloads |
+| P3 | Infinite scroll / virtualized long lists | >1000 items |
+| P3 | Reading time, "only unread", sort by date | UX |
+| P3 | Service Worker for true offline fetch | background refresh needs a proxy |
+| P4 | Keyboard shortcuts (g a g u j k) | Google Reader muscle memory |
+| P4 | Push notifications for new items | needs a background fetch source |
+
+## Deploy to GitHub Pages
+
+1. Push this repo.
+2. Vite build emits `dist/`. Use the GitHub Action in
+   `.github/workflows/deploy.yml` (or push `dist/` to a `gh-pages` branch).
+3. **Subpath note:** if deployed at `github.com/<user>/sscc/`, set `base: '/sscc/'`
+   in `vite.config.js` (already done for this repo name). For a root site
+   (`github.com/<user>/`) set `base: '/'`.
+
+## Develop
+
+```bash
+npm install
+npm run dev      # http://localhost:5173
+npm run build    # static output in dist/
+npm run preview  # serve the production build locally
+```
+
+## Tech stack
+
+Vite + React + plain CSS. No routing library (state-driven panes), no Redux
+(store module with change notifications). Deliberately minimal to keep the
+bundle small and the dependency surface tiny — appropriate for a static Pages
+deploy.
