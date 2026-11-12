@@ -34,6 +34,7 @@ function eq(a, b, msg) {
 const db = await import('../src/lib/db.js');
 const store = await import('../src/lib/store.js');
 const refresh = await import('../src/lib/refresh.js');
+const proxy = await import('../src/lib/proxy.js');
 
 function makeFeed(url, n) {
   return {
@@ -101,6 +102,23 @@ eq(typeof ms, 'number', 'start() returns the interval in ms');
 const r = await refresh.refreshAll({});
 eq(r, { refreshed: 0, errors: 0 }, 'refreshAll with no feeds returns zeroed result');
 ok(Boolean(store.getState().refresh.lastRun), 'refreshAll records lastRun in status');
+
+console.log('\nproxy: looksLikeXml rejects non-feed bodies');
+ok(proxy.looksLikeXml('<?xml version="1.0"?><rss><channel/></rss>'), 'XML-declared RSS accepted');
+ok(proxy.looksLikeXml('<rss version="2.0"><channel/></rss>'), 'declaration-less RSS accepted');
+ok(proxy.looksLikeXml('<?xml?><feed xmlns="http://www.w3.org/2005/Atom"><entry/></feed>'), 'Atom accepted');
+ok(proxy.looksLikeXml('\uFEFF  <feed></feed>'), 'BOM + whitespace tolerated');
+ok(!proxy.looksLikeXml('Title: ITC.ua – …\nURL Source: …'), 'Jina reader markdown rejected');
+ok(!proxy.looksLikeXml('<html><head><title>500 Internal Server Error</title></head></html>'), 'HTML error page rejected');
+ok(!proxy.looksLikeXml(''), 'empty body rejected');
+
+console.log('\nproxy: custom template maps ${url} (encoded)');
+proxy.setUserProxy('https://proxy.example/fetch?url=${url}');
+eq(proxy.getUserProxy(), 'https://proxy.example/fetch?url=${url}', 'template stored');
+// Reproduce the mapping the fetch loop uses.
+const mapped = proxy.getUserProxy().replace('${url}', encodeURIComponent('https://itc.ua/ua/feed/'));
+eq(mapped, 'https://proxy.example/fetch?url=https%3A%2F%2Fitc.ua%2Fua%2Ffeed%2F', 'placeholder URL-encoded');
+proxy.setUserProxy('');
 
 console.log(`\n${passes} passed, ${failures} failed\n`);
 process.exit(failures ? 1 : 0);

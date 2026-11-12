@@ -25,11 +25,11 @@ export default function SettingsDialog({ theme, proxy, intervalMs, onClose, onSe
         <input
           id="proxy"
           value={proxy}
-          placeholder="https://myproxy.example/?url="
+          placeholder="https://myproxy.example/?url=${url}"
           onChange={(e) => onSetProxy(e.target.value)}
         />
         <div className="hint">
-          A template with a single <code>{'{url}'}</code> placeholder. Left empty to use the
+          A template with a single <code>{'{${url}}'}</code> placeholder (URL-encoded). Left empty to use the
           built-in public proxies.
         </div>
 
