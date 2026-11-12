@@ -1,12 +1,13 @@
 // proxy.js — the single choke point for every outbound feed fetch.
 //
 // Browsers cannot fetch arbitrary feed URLs from a Pages-hosted SPA because the
-// feed host will not send Access-Control-Allow-Origin. We route every request
-// through a list of CORS proxies and try them in order until one returns a body
-// that actually parses as a feed.
+// feed host will not send Access-Control-Allow-Origin. So we try the origin
+// directly first, and only route through a list of CORS proxies when the origin
+// blocks the cross-origin read. We try proxies in order until one returns a
+// body that actually parses as a feed.
 //
-// The list is data, not code: swap in a self-hosted proxy or a GitHub Actions
-// worker later by editing PROXIES below. The UI never needs to change.
+// The proxy list is data, not code: swap in a self-hosted proxy or a GitHub
+// Actions worker later by editing PUBLIC_PROXIES below. The UI never changes.
 //
 // Two things make this robust instead of "first 200 wins":
 //   - each entry can carry extra request headers (Jina needs X-Return-Format),
@@ -31,7 +32,7 @@ const PUBLIC_PROXIES = [
 /**
  * @typedef {Object} FetchResult
  * @property {string} body raw response body
- * @property {string} source the proxy that succeeded (for diagnostics)
+ * @property {string} source the origin that succeeded (direct host or proxy)
  */
 
 // A user-supplied proxy overrides the public list. Stored as a template string
@@ -69,13 +70,30 @@ export function looksLikeXml(body) {
 }
 
 /**
- * Fetch a feed URL as text, trying proxies in order. A proxy only "succeeds"
- * when it returns a non-empty body that looks like XML; otherwise we move on.
+ * Fetch a feed URL as text. Tries the origin directly first (no third party,
+ * when the host permits cross-origin reads), then falls back to the proxy list
+ * in order. A proxy only "succeeds" when it returns a non-empty body that looks
+ * like XML; otherwise we move on.
  * @param {string} url
  * @param {AbortSignal} [signal]
  * @returns {Promise<FetchResult>}
  */
 export async function fetchFeedText(url, signal) {
+  // 1. Direct. Works when the host sends Access-Control-Allow-Origin; many do.
+  //    A CORS or network failure is swallowed — we fall back to proxies.
+  try {
+    const res = await fetchWithTimeout(url, signal, DIRECT_TIMEOUT_MS);
+    if (res.ok) {
+      const body = await res.text();
+      if (body?.trim() && looksLikeXml(body)) {
+        return { body, source: directSource(url) };
+      }
+    }
+  } catch {
+    // CORS block or timeout — fall through to proxies.
+  }
+
+  // 2. Proxies.
   const userEntry = userProxy
     ? [{ map: (u) => userProxy.replace('${url}', encodeURIComponent(u)) }]
     : [];
@@ -108,6 +126,34 @@ export async function fetchFeedText(url, signal) {
     }
   }
   throw lastError || new Error('All proxies failed');
+}
+
+const DIRECT_TIMEOUT_MS = 8000;
+
+/**
+ * fetch() with a hard timeout. Combines the caller's AbortSignal (lifecycle)
+ * with a per-attempt timeout so a slow/hung origin can't stall a subscription.
+ * @param {string} url
+ * @param {AbortSignal} [signal]
+ * @param {number} ms
+ */
+function fetchWithTimeout(url, signal, ms) {
+  const ctrl = new AbortController();
+  if (signal) {
+    if (signal.aborted) ctrl.abort();
+    else signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+  }
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
+
+function directSource(url) {
+  try {
+    const u = new URL(url);
+    return `${u.hostname} (direct)`;
+  } catch {
+    return 'direct';
+  }
 }
 
 function short(url) {
