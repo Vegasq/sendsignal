@@ -10,7 +10,7 @@ all stored locally on the machine that opens the app.
 |---|---|
 | No backend | No server can fetch feeds for us. Browsers block cross-origin `fetch` to feed URLs (CORS). |
 | GitHub Pages | Pure static output (`dist/`). Deploy = push a branch or a GitHub Action artifact. |
-| Runs in browser | All state lives in `localStorage`. Full article bodies are **not** persisted (5 MB cap) — only lightweight metadata is. |
+| Runs in browser | Lightweight state (feeds/folders/read/theme/proxy/interval) lives in `localStorage`; full article bodies live in `IndexedDB` (no 5 MB cap) and survive reloads. |
 
 ### The CORS problem — and how we solve it
 
@@ -33,7 +33,9 @@ Browser SPA (React + Vite static build)
 │
 ├─ proxy.js        fetch feed URL  -> raw XML text  (swap the transport)
 ├─ feedParser.js   XML text        -> normalized feed + items
-├─ store.js        feeds/folders/read-ids  <-> localStorage (persist lightweight state)
+├─ store.js        feeds/folders/read-ids/refresh  <-> localStorage (lightweight state)
+├─ db.js           full article bodies <-> IndexedDB (survive reloads, 100/feed)
+├─ refresh.js      periodic + on-visible refresh, throttled per feed
 │
 └─ components/
    ├─ Sidebar.jsx      folders + feed list (+ counts)
@@ -46,10 +48,14 @@ Browser SPA (React + Vite static build)
 ```
 
 **State model** (`store.js`):
-- `feeds: [{id, url, title, folder, lastUpdated}]`
+- `feeds: [{id, url, title, folder, lastUpdated}]` — persisted in `localStorage`
 - `folders: string[]`
 - `read: Set<itemId>` persisted as a JSON array
-- `items` (full article bodies) kept **in memory only**; re-fetched on next load.
+- `items` (full article bodies) cached in memory and mirrored to `IndexedDB`
+  (`db.js`), hydrated on load so content survives reloads. Each feed keeps its
+  newest 100 items.
+- `refresh: {lastRun, intervalMs, running, errors}` — scheduler status surfaced
+  to the header (last-updated time, busy spin, per-feed error count).
 
 ## Features (MVP — implemented)
 
@@ -59,19 +65,25 @@ Browser SPA (React + Vite static build)
 - Unread counts per feed; mark individual or all as read.
 - Full-text reader with prev/next and in-reader read toggles.
 - Full-text search across subscribed feeds.
+- Automatic refresh on an interval (15/30/60/180 min) and whenever you return to
+  the tab; feeds refreshed within the last 15 minutes are skipped. The ⟳ button
+  forces an immediate refresh and bypasses the throttle.
+- Article bodies persist in `IndexedDB`, so the inbox reloads instantly and
+  works offline after the first load.
 - Dark mode; all preferences persisted locally.
-- Offline after first load (static assets + in-memory cache).
+- Offline after first load (static assets + IndexedDB cache).
 
 ## Roadmap
 
 | Priority | Item | Notes |
 |---|---|---|
 | MVP | Feed fetch/parse, folders, read state, search | done |
+| MVP | IndexedDB for article bodies | persist full content across reloads | done |
+| MVP | Periodic + on-visible refresh | throttled per feed; manual override | done |
 | P2 | Self-hosted proxy option + `:8080` dev proxy | removes public-proxy rate limits |
-| P2 | IndexedDB for article bodies | persist full content across reloads |
 | P3 | Infinite scroll / virtualized long lists | >1000 items |
 | P3 | Reading time, "only unread", sort by date | UX |
-| P3 | Service Worker for true offline fetch | background refresh needs a proxy |
+| P3 | Service Worker for true background fetch | background refresh needs a proxy |
 | P4 | Keyboard shortcuts (g a g u j k) | Google Reader muscle memory |
 | P4 | Push notifications for new items | needs a background fetch source |
 
@@ -91,6 +103,7 @@ npm install
 npm run dev      # http://localhost:5173
 npm run build    # static output in dist/
 npm run preview  # serve the production build locally
+npm test         # node feature tests (IndexedDB round-trip, hydration, throttle)
 ```
 
 ## Tech stack

@@ -10,9 +10,17 @@
 const KEY = 'sscc.v1';
 
 /** @typedef {import('./feedParser').NormalizedFeed} NormalizedFeed */
+import { parseFeed } from './feedParser.js';
+import { saveFeed, loadAllFeeds, deleteFeed } from './db.js';
 
-/** @type {{feeds: Feed[], read: Set<string>, theme: 'light'|'dark', proxy: string}} */
-let state = { feeds: [], read: new Set(), theme: 'dark', proxy: '' };
+/** @type {{feeds: Feed[], read: Set<string>, theme: 'light'|'dark', proxy: string, refresh: RefreshStatus}} */
+let state = {
+  feeds: [],
+  read: new Set(),
+  theme: 'dark',
+  proxy: '',
+  refresh: { lastRun: '', intervalMs: 30 * 60 * 1000, running: false, errors: {} },
+};
 
 /** @type {Map<string, NormalizedFeed>} feed url -> cached feed (bodies live here) */
 const articleCache = new Map();
@@ -35,6 +43,12 @@ const listeners = new Set();
  *  @property {string} proxy
  *  @property {string[]} folders */
 
+/** @typedef {Object} RefreshStatus
+ *  @property {string} lastRun ISO time of last refresh tick, or ''
+ *  @property {number} intervalMs ms between automatic refreshes
+ *  @property {boolean} running
+ *  @property {Record<string,string>} errors keyed by feed url */
+
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -44,6 +58,13 @@ function load() {
     state.read = new Set(Array.isArray(data.read) ? data.read : []);
     state.theme = data.theme === 'light' ? 'light' : 'dark';
     state.proxy = typeof data.proxy === 'string' ? data.proxy : '';
+    // intervalMs is a preference (persisted); lastRun/errors are runtime only.
+    state.refresh = {
+      lastRun: '',
+      intervalMs: typeof data.intervalMs === 'number' ? data.intervalMs : state.refresh.intervalMs,
+      running: false,
+      errors: {},
+    };
     setUserProxy(state.proxy);
   } catch {
     /* corrupt storage: start fresh */
@@ -57,6 +78,7 @@ function persist() {
       read: [...state.read],
       theme: state.theme,
       proxy: state.proxy,
+      intervalMs: state.refresh.intervalMs,
     }));
   } catch (e) {
     // Storage full (e.g. huge read set) — read toggles simply won't persist.
@@ -81,6 +103,7 @@ export function getState() {
     theme: state.theme,
     proxy: state.proxy,
     folders,
+    refresh: state.refresh,
   };
 }
 
@@ -110,6 +133,54 @@ export function setUserProxy(template) {
 
 function findFeed(url) {
   return state.feeds.find((f) => f.url === url);
+}
+
+/**
+ * Publish a freshly parsed feed into the cache + IndexedDB + feed metadata.
+ * Shared by addFeed and refreshFeed so persistence lives in exactly one place.
+ * @param {string} url
+ * @param {NormalizedFeed} normalized
+ */
+async function ingest(url, normalized) {
+  const feed = findFeed(url);
+  articleCache.set(url, normalized);
+  if (feed) {
+    if (normalized.title) feed.title = normalized.title.trim();
+    if (normalized.homePage) feed.homePage = normalized.homePage.trim();
+    feed.lastUpdated = new Date().toISOString();
+  }
+  await saveFeed({
+    url,
+    title: (normalized.title || '').trim(),
+    homePage: (normalized.homePage || '').trim(),
+    items: normalized.items,
+  });
+}
+
+/**
+ * Test seam: publish a parsed feed without any network. Persists to IndexedDB
+ * and updates the in-memory cache + feed metadata.
+ * @param {string} url
+ * @param {NormalizedFeed} normalized
+ */
+export function ingestFeed(url, normalized) {
+  const feed = findFeed(url);
+  if (!feed) {
+    state.feeds.push({
+      id: 'f_' + shortId(url),
+      url,
+      title: (normalized.title || url).trim(),
+      folder: '',
+      homePage: (normalized.homePage || url).trim(),
+      lastUpdated: new Date().toISOString(),
+    });
+  } else if (normalized.title) {
+    feed.title = normalized.title.trim();
+  }
+  return ingest(url, normalized).then(() => {
+    persist();
+    notify();
+  });
 }
 
 /**
@@ -144,7 +215,7 @@ export async function addFeed(url, folder = '') {
     lastUpdated: '',
   };
   state.feeds.push(feed);
-  articleCache.set(normalized, parsed);
+  await ingest(normalized, parsed);
   persist();
   notify();
   return feed;
@@ -161,12 +232,27 @@ export async function refreshFeed(feedUrl) {
     const { fetchFeedText } = await import('./proxy.js');
     const { body } = await fetchFeedText(feedUrl, new AbortController().signal);
     const parsed = parseFeed(body, feedUrl);
-    articleCache.set(feedUrl, parsed);
-    feed.lastUpdated = new Date().toISOString();
+    await ingest(feedUrl, parsed);
     persist();
     notify();
   } catch (e) {
     throw e;
+  }
+}
+
+/**
+ * Hydrate the in-memory article cache from IndexedDB. Called once at startup so
+ * article bodies survive reloads. Non-fatal if IndexedDB is unavailable.
+ * @returns {Promise<number>} number of feeds restored
+ */
+export async function hydrate() {
+  try {
+    const feeds = await loadAllFeeds();
+    for (const f of feeds) articleCache.set(f.url, f);
+    return feeds.length;
+  } catch (e) {
+    console.warn('hydrate failed', e);
+    return 0;
   }
 }
 
@@ -204,6 +290,28 @@ export function removeFeed(feedUrl) {
   state.feeds = state.feeds.filter((f) => f.url !== feedUrl);
   articleCache.delete(feedUrl);
   persist();
+  // Persisted bodies are orphaned; drop them. Non-fatal if unavailable.
+  deleteFeed(feedUrl).catch((e) => console.warn('deleteFeed failed', e));
+  notify();
+}
+
+/**
+ * Set the automatic refresh interval (ms). Restarts any running scheduler.
+ * @param {number} ms
+ */
+export function setRefreshInterval(ms) {
+  state.refresh.intervalMs = Number.isFinite(ms) && ms > 0 ? ms : state.refresh.intervalMs;
+  persist();
+  notify();
+}
+
+/**
+ * Merge partial refresh status (lastRun/running/errors) and notify. The
+ * interval preference is persisted separately via setRefreshInterval.
+ * @param {Partial<RefreshStatus>} partial
+ */
+export function setRefreshStatus(partial) {
+  state.refresh = { ...state.refresh, ...partial };
   notify();
 }
 
@@ -289,4 +397,5 @@ function esc(s) {
 }
 
 load();
+hydrate();
 notify();

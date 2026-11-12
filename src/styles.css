@@ -78,6 +78,9 @@ body {
   border-radius: 6px;
 }
 .header button.icon:hover { background: var(--bg-hover); color: var(--fg); }
+.header button.icon.is-busy { color: var(--accent); }
+.header button.icon.is-busy { animation: sscc-spin 1s linear infinite; }
+@keyframes sscc-spin { to { transform: rotate(360deg); } }
 .header .spacer { flex: 1; }
 
 /* Sidebar */

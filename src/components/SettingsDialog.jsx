@@ -1,4 +1,4 @@
-export default function SettingsDialog({ theme, proxy, onClose, onSetTheme, onSetProxy }) {
+export default function SettingsDialog({ theme, proxy, intervalMs, onClose, onSetTheme, onSetProxy, onSetInterval }) {
   return (
     <div className="overlay" onMouseDown={onClose}>
       <div className="dialog" onMouseDown={(e) => e.stopPropagation()}>
@@ -8,6 +8,18 @@ export default function SettingsDialog({ theme, proxy, onClose, onSetTheme, onSe
           <option value="dark">Dark</option>
           <option value="light">Light</option>
         </select>
+
+        <label htmlFor="refresh-interval">Refresh interval</label>
+        <select id="refresh-interval" value={String(intervalMs)} onChange={(e) => onSetInterval(e.target.value)}>
+          <option value={15 * 60000 + ''}>Every 15 minutes</option>
+          <option value={30 * 60000 + ''}>Every 30 minutes</option>
+          <option value={60 * 60000 + ''}>Every hour</option>
+          <option value={180 * 60000 + ''}>Every 3 hours</option>
+        </select>
+        <div className="hint">
+          While the tab is open, feeds are also refreshed when you return to it. Use the
+          ⟳ button for an immediate refresh.
+        </div>
 
         <label htmlFor="proxy">Custom feed proxy (optional)</label>
         <input
