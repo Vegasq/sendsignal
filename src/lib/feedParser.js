@@ -40,7 +40,7 @@ export function parseFeed(xml, feedUrl) {
   }
 
   const root = doc.documentElement;
-  const rootName = root.localName || root.tagName.toLowerCase();
+  const rootName = (root.localName || root.tagName).toLowerCase();
 
   let title = '';
   let homePage = '';
@@ -92,20 +92,28 @@ function parseItem(node, fallbackId) {
   };
 }
 
-// --- field accessors (namespace-tolerant via local-name matching) ---
+// --- field accessors (namespace-tolerant via localName matching) ---
 
+// Return the first descendant whose localName matches one of `names`, so
+// `<content:encoded>` and `<dc:date>` resolve the same as their un-namespaced
+// forms. Uses a manual pre-order walk on `localName` rather than
+// `getElementsByTagNameNS('*')`, which some engines (happy-dom) return empty
+// for on no-namespace elements, and rather than `querySelector('*[local-name()..]')`,
+// which is XPath (not CSS) and throws in strict browsers.
 function childByLocalName(parent, names) {
   if (!parent) return null;
-  for (const name of names) {
-    const el = parent.querySelector(`*[local-name()="${name}"]`);
-    if (el) return el;
-  }
-  // Fallback for engines where local-name() is unsupported.
-  for (const name of names) {
-    const el = parent.querySelector(name);
-    if (el) return el;
-  }
-  return null;
+  const wanted = new Set(names);
+  let found = null;
+  (function walk(node) {
+    if (found) return;
+    for (const child of node.childNodes) {
+      if (child.nodeType === 1) {
+        if (wanted.has(child.localName)) { found = child; return; }
+        walk(child);
+      }
+    }
+  })(parent);
+  return found;
 }
 
 function firstByLocalName(parent, names) {
@@ -122,9 +130,12 @@ function textOf(el) {
 
 function htmlOf(el) {
   if (!el) return '';
-  // Prefer the serialized inner HTML (preserves CDATA'd markup); fall back to text.
-  const inner = el.innerHTML?.trim();
-  return inner || textOf(el);
+  // Prefer the serialized inner HTML (preserves markup); fall back to text.
+  const inner = (el.innerHTML || '').trim();
+  if (!inner) return textOf(el);
+  // XML/HTML serialization wraps CDATA'd markup as <![CDATA[ … ]]>; strip the
+  // wrapper so the stored article body is clean HTML.
+  return inner.replace(/^\s*<!\[CDATA\[/, '').replace(/\]\]>\s*$/, '');
 }
 
 function linkOf(el) {
@@ -164,12 +175,12 @@ function atomHomeLink(node) {
 }
 
 function atomId(node) {
-  const el = node.querySelector('*[local-name()="id"]') || node.getElementsByTagName('id')[0];
+  const el = childByLocalName(node, ['id']);
   return el ? el.textContent || '' : '';
 }
 
 function atomAuthor(node) {
-  const el = node.querySelector('*[local-name()="author"]');
+  const el = childByLocalName(node, ['author']);
   if (!el) return '';
   return textOf(el) || textOf(childByLocalName(el, ['name'])) || '';
 }

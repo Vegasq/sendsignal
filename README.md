@@ -109,7 +109,7 @@ npm install
 npm run dev      # http://localhost:5173
 npm run build    # static output in dist/
 npm run preview  # serve the production build locally
-npm test         # node feature tests (IndexedDB round-trip, hydration, throttle)
+npm test         # node feature tests (IndexedDB round-trip, hydration, throttle; RSS/Atom/RDF feed parsing)
 ```
 
 ## Tech stack
