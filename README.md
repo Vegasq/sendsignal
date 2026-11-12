@@ -14,14 +14,20 @@ all stored locally on the machine that opens the app.
 
 ### The CORS problem — and how we solve it
 
-A feed URL like `https://example.com/rss` cannot be `fetch`ed directly from a
-Pages-hosted SPA; the feed host won't send `Access-Control-Allow-Origin`. We
-route feed fetches through a **pluggable CORS proxy** (`src/lib/proxy.js`).
-A public proxy is used by default so the app works out of the box; a
+A feed URL like `https://example.com/rss` may or may not be `fetch`ed directly
+from a Pages-hosted SPA: the feed host must send `Access-Control-Allow-Origin`,
+and many don't. So `src/lib/proxy.js` tries the origin **directly first**, and
+only routes through a **pluggable CORS proxy** when the origin blocks the
+cross-origin read (or returns something that isn't a feed). A public proxy is
+used by default so the app works out of the box; a
 user-supplied proxy can be set in Settings. This is the one third-party
 dependency the architecture accepts, and it is isolated behind a single module
 so it can be swapped (or replaced by a self-hosted proxy / GitHub Actions
 worker) later without touching the UI.
+
+A response is accepted only if its body looks like a feed (RSS 2.0, Atom, or
+RDF/RSS 1.0) — a 200 from a reader service or an HTML error page never
+masquerades as a feed.
 
 Feed content is fetched as text and parsed client-side with `DOMParser`
 (`src/lib/feedParser.js`), supporting **RSS 2.0, Atom, and RDF/RSS 1.0**.
