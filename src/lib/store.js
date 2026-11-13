@@ -199,13 +199,18 @@ function schedulePush() {
 }
 
 /**
- * Force an immediate cloud sync from the manual "sync" button. Returns true when
- * a user is signed in (a push was attempted) so the UI can show status, false
- * when signed out (nothing to sync).
+ * Force an immediate cloud sync from the manual "sync" button. This is a full
+ * *reconcile*, not a push-only write: it pulls the cloud row, merges it into
+ * local (cloud wins on a feed-url conflict, union otherwise — see
+ * mergeCloudState), writes the merged state back, and arms a trailing push so
+ * local and cloud stay consistent. Pressing it on either machine therefore
+ * pulls the other machine's feeds in instead of overwriting the cloud with this
+ * machine's partial state (which is what a push-only write did). Returns true
+ * when a user is signed in (a merge was attempted), false when signed out.
  */
 export async function syncNow() {
   if (!syncUserId) return false;
-  void pushCurrent();
+  await syncMerge();
   return true;
 }
 

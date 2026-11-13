@@ -359,5 +359,39 @@ console.log('\nsync: store.syncMerge unions cloud into local and writes it back'
   ok(rec.lastPush.data.read.includes('cloud://news::c1'), 'push carries unioned read ids');
 }
 
+console.log('\nsync: store.syncNow reconciles (pulls cloud into local), does not push-only');
+{
+  // Cloud holds feeds this machine does not have yet (e.g. added on another
+  // device). Local state starts WITHOUT them.
+  const cloudRow = {
+    feeds: [{ url: 'cloud://remote', title: 'Remote', folder: 'Shared', homePage: '', lastUpdated: '' }],
+    folders: ['Shared'],
+    read: [],
+    saved: [],
+  };
+  const { api, rec } = makeMockClient(cloudRow);
+  sync._setClientForTests(api, 'user-2');
+
+  // Local state that predates this machine's sync press.
+  await store.ingestFeed('local://only', makeFeed('local://only', 1));
+
+  const pushed = await store.syncNow();
+  ok(pushed === true, 'syncNow returns true when signed in');
+  const st = store.getState();
+  ok(st.feeds.some((f) => f.url === 'cloud://remote'), 'syncNow pulled the cloud feed into local');
+  ok(st.feeds.some((f) => f.url === 'local://only'), 'syncNow kept the local-only feed');
+
+  // The reconcile then pushes the merged (superset) state back — so it cannot
+  // wipe the cloud with this machine's partial state. The push is debounced
+  // (~700ms) like every other cloud write.
+  await new Promise((r) => setTimeout(r, 800));
+  ok(rec.lastPush, 'syncNow pushed the merged state back to the cloud');
+  ok(
+    rec.lastPush.data.feeds.some((f) => f.url === 'local://only') &&
+      rec.lastPush.data.feeds.some((f) => f.url === 'cloud://remote'),
+    'pushed payload carries the unioned feeds (no data loss)',
+  );
+}
+
 console.log(`\n${passes} passed, ${failures} failed\n`);
 process.exit(failures ? 1 : 0);
