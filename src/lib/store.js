@@ -166,26 +166,47 @@ export async function startCloudSync() {
 }
 
 /**
+ * Push the current local state to the cloud. No-op when signed out. Shared by
+ * the debounced trailing push and the manual sync button so both write the same
+ * payload.
+ */
+async function pushCurrent() {
+  if (!syncUserId) return;
+  try {
+    const s = await getSync();
+    await s.pushState({
+      feeds: state.feeds,
+      folders: state.folders,
+      read: [...state.read],
+      saved: [...state.saved],
+    });
+  } catch (e) {
+    console.warn('sync: push failed', e);
+  }
+}
+
+/**
  * Debounce cloud writes: a read toggle fires persist() many times a minute, so
  * coalesce them into a single trailing push ~700ms after the last change.
  */
 function schedulePush() {
   if (!syncUserId) return;
   clearTimeout(pushTimer);
-  pushTimer = setTimeout(async () => {
+  pushTimer = setTimeout(() => {
     pushTimer = null;
-    try {
-      const s = await getSync();
-      await s.pushState({
-        feeds: state.feeds,
-        folders: state.folders,
-        read: [...state.read],
-        saved: [...state.saved],
-      });
-    } catch (e) {
-      console.warn('sync: push failed', e);
-    }
+    void pushCurrent();
   }, 700);
+}
+
+/**
+ * Force an immediate cloud sync from the manual "sync" button. Returns true when
+ * a user is signed in (a push was attempted) so the UI can show status, false
+ * when signed out (nothing to sync).
+ */
+export async function syncNow() {
+  if (!syncUserId) return false;
+  void pushCurrent();
+  return true;
 }
 
 /**

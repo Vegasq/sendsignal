@@ -14,6 +14,7 @@ import {
   setSaved,
   hydrate,
   startCloudSync,
+  syncNow,
 } from './lib/store.js';
 import { initSupabase, signInWithGoogle, signOut, onUserId } from './lib/sync.js';
 import * as refresh from './lib/refresh.js';
@@ -33,6 +34,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [user, setUser] = useState(null);
+  // Cloud-sync feedback: 'idle' | 'syncing' | 'done'. Drives the manual sync button.
+  const [syncState, setSyncState] = useState('idle');
 
   // Cloud-sync bootstrap. Register the store's auth listener *before* initSupabase
   // seeds the current session, so a persisted login merges on this very load.
@@ -132,6 +135,20 @@ export default function App() {
     return refresh.refreshNow();
   }, []);
 
+  // Force an immediate cloud sync. syncNow() is false when signed out, so the
+  // button stays idle then. On success, show a brief "done" tick, then revert.
+  const handleSync = useCallback(async () => {
+    if (syncState === 'syncing') return;
+    setSyncState('syncing');
+    const pushed = await syncNow();
+    if (!pushed) {
+      setSyncState('idle');
+      return;
+    }
+    setSyncState('done');
+    setTimeout(() => setSyncState('idle'), 1500);
+  }, [syncState]);
+
   // Keyboard navigation (Google Reader style): j/k or arrows move selection
   // through the current list, g/G jump to the ends, x/u mark read/unread.
   // Ignored while typing in a field so it never fights the search box.
@@ -212,6 +229,8 @@ export default function App() {
         onSettings={() => setSettingsOpen(true)}
         refresh={state.refresh}
         onRefresh={handleRefresh}
+        onSync={handleSync}
+        syncState={syncState}
         user={user}
         onSignIn={() => void signInWithGoogle()}
         onSignOut={() => void signOut()}
@@ -266,7 +285,7 @@ export default function App() {
   );
 }
 
-function Header({ search, onSearch, theme, onToggleTheme, onSettings, refresh, onRefresh, user, onSignIn, onSignOut }) {
+function Header({ search, onSearch, theme, onToggleTheme, onSettings, refresh, onRefresh, onSync, syncState, user, onSignIn, onSignOut }) {
   const running = Boolean(refresh?.running);
   const errCount = refresh ? Object.keys(refresh.errors || {}).length : 0;
   let title = 'Refresh now';
@@ -299,7 +318,23 @@ function Header({ search, onSearch, theme, onToggleTheme, onSettings, refresh, o
       </button>
       <button className="icon" onClick={onSettings} title="Settings">⚙</button>
       {user ? (
-        <button className="icon" onClick={onSignOut} title="Signed in — your feeds sync to the cloud">☁</button>
+        <>
+          <button
+            className={"icon" + (syncState === 'syncing' ? ' is-busy' : '')}
+            onClick={onSync}
+            title={
+              syncState === 'syncing'
+                ? 'Syncing to the cloud…'
+                : syncState === 'done'
+                  ? 'Synced to the cloud'
+                  : 'Sync now to the cloud'
+            }
+            aria-busy={syncState === 'syncing'}
+          >
+            {syncState === 'done' ? '✓' : '⟲'}
+          </button>
+          <button className="icon" onClick={onSignOut} title="Signed in — your feeds sync to the cloud">☁</button>
+        </>
       ) : (
         <button className="icon" onClick={onSignIn} title="Sign in with Google to sync across devices">Sign in</button>
       )}
