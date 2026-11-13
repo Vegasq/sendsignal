@@ -146,6 +146,16 @@ body {
 .nav-item.drop-active { background: var(--unread-bg); outline-color: var(--accent); }
 .nav-item.subtle { color: var(--fg-muted); font-style: italic; }
 
+/* Feeds grouped under their folder headers */
+.folder-group { margin-bottom: 6px; }
+.folder-row { font-weight: 600; }
+.folder-feeds {
+  padding-left: 14px;
+  margin: 2px 0 4px 10px;
+  border-left: 1px solid var(--border);
+}
+.feed-row { font-weight: 400; }
+
 /* Article list */
 .articles {
   grid-area: articles;

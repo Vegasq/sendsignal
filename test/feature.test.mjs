@@ -160,5 +160,16 @@ const folderRows = buildList(st2, { kind: 'folder', name: 'News' }, '', false);
 eq(folderRows.filter((r) => r.feedUrl === 'feed://m1').length, 2, 'folder view lists that feed items');
 eq(folderRows.some((r) => r.feedUrl === 'feed://m2'), false, 'other feed excluded from the folder view');
 
+console.log('\nsidebar grouping — feeds partition under their folder vs uncategorized');
+{
+  const feeds = store.getState().feeds;
+  const inNews = feeds.filter((f) => f.folder === 'News');
+  const uncategorized = feeds.filter((f) => !f.folder);
+  eq(inNews.map((f) => f.url).sort(), ['feed://m1'], 'folder groups only its own feeds');
+  eq(uncategorized.some((f) => f.url === 'feed://m2'), true, 'uncategorized list holds the uncategorized feed');
+  eq(uncategorized.some((f) => f.url === 'feed://m1'), false, 'a grouped feed is not also uncategorized');
+  eq(feeds.every((f) => f.folder === '' || f.folder === 'News'), true, 'every feed lands in exactly one group');
+}
+
 console.log(`\n${passes} passed, ${failures} failed\n`);
 process.exit(failures ? 1 : 0);

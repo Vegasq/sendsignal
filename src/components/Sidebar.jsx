@@ -38,6 +38,31 @@ export default function Sidebar({
     e.target.closest('.nav-item')?.classList.remove('drop-active');
   }
 
+  // A feed row, reused under each folder and in the uncategorized list.
+  function FeedRow({ feed }) {
+    const count = unreadCounts[feed.url] || 0;
+    return (
+      <div
+        className={"nav-item feed-row" + (view.kind === 'feed' && view.name === feed.url ? ' active' : '') + (count ? ' has-unread' : '')}
+        onClick={() => onView({ kind: 'feed', name: feed.url })}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData('text/plain', feed.url);
+          e.dataTransfer.effectAllowed = 'move';
+          e.target.closest('.nav-item')?.classList.add('dragging');
+        }}
+        onDragEnd={(e) => { e.target.closest('.nav-item')?.classList.remove('dragging'); }}
+        onContextMenu={(e) => { e.preventDefault(); setMenu({ url: feed.url, x: e.clientX, y: e.clientY }); }}
+        title={feed.url}>
+        <span className="dot" />
+        <span className="label">{feed.title}</span>
+        <span className="del" title="Unsubscribe"
+           onClick={(e) => { e.stopPropagation(); onRemoveFeed(feed.url); }}>✕</span>
+        <span className="count">{count}</span>
+      </div>
+    );
+  }
+
   return (
     <aside className="sidebar">
       <div className="side-section">
@@ -84,17 +109,24 @@ export default function Sidebar({
         )}
         {state.folders.map((folder) => {
           const count = unreadCounts['folder::' + folder] || 0;
+          const feeds = state.feeds.filter((f) => f.folder === folder);
           return (
-            <div
-              key={folder}
-              className={"nav-item drop-target" + (view.kind === 'folder' && view.name === folder ? ' active' : '')}
-              onClick={() => onView({ kind: 'folder', name: folder })}
-              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.target.closest('.nav-item')?.classList.add('drop-active'); }}
-              onDragLeave={(e) => { e.target.closest('.nav-item')?.classList.remove('drop-active'); }}
-              onDrop={(e) => handleDrop(e, folder)}>
-              <span className="dot" />
-              <span className="label">{folder}</span>
-              <span className="count">{count}</span>
+            <div className="folder-group" key={folder}>
+              <div
+                className={"nav-item folder-row drop-target" + (view.kind === 'folder' && view.name === folder ? ' active' : '')}
+                onClick={() => onView({ kind: 'folder', name: folder })}
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.target.closest('.nav-item')?.classList.add('drop-active'); }}
+                onDragLeave={(e) => { e.target.closest('.nav-item')?.classList.remove('drop-active'); }}
+                onDrop={(e) => handleDrop(e, folder)}>
+                <span className="dot" />
+                <span className="label">{folder}</span>
+                <span className="count">{count}</span>
+              </div>
+              <div className="folder-feeds">
+                {feeds.map((feed) => (
+                  <FeedRow key={feed.id} feed={feed} />
+                ))}
+              </div>
             </div>
           );
         })}
@@ -108,34 +140,11 @@ export default function Sidebar({
           <span>Feeds</span>
           <button onClick={() => setAdding(true)} title="Add feed">+</button>
         </div>
-        {state.feeds.map((feed) => {
-          const count = unreadCounts[feed.url] || 0;
-          return (
-            <div
-              key={feed.id}
-              draggable
-              className={"nav-item" + (view.kind === 'feed' && view.name === feed.url ? ' active' : '') + (count ? ' has-unread' : '')}
-              onClick={() => onView({ kind: 'feed', name: feed.url })}
-              onDragStart={(e) => {
-                e.dataTransfer.setData('text/plain', feed.url);
-                e.dataTransfer.effectAllowed = 'move';
-                e.target.closest('.nav-item')?.classList.add('dragging');
-              }}
-              onDragEnd={(e) => { e.target.closest('.nav-item')?.classList.remove('dragging'); }}
-              onContextMenu={(e) => { e.preventDefault(); setMenu({ url: feed.url, x: e.clientX, y: e.clientY }); }}
-              title={feed.url}>
-              <span className="dot" />
-              <span className="label">{feed.title}</span>
-              <span className="del" title="Unsubscribe"
-                 onClick={(e) => { e.stopPropagation(); onRemoveFeed(feed.url); }}>✕</span>
-              <span className="count">{count}</span>
-            </div>
-          );
-        })}
-        {state.feeds.length === 0 && (
-          <div style={{ color: 'var(--fg-muted)', fontSize: 12, padding: '4px 12px' }}>
-            No feeds. Click + to subscribe.
-          </div>
+        {state.feeds.filter((f) => !f.folder).map((feed) => (
+          <FeedRow key={feed.id} feed={feed} />
+        ))}
+        {state.feeds.every((f) => f.folder) && !creating && (
+          <div style={{ color: 'var(--fg-muted)', fontSize: 12, padding: '4px 12px' }}>No uncategorized feeds</div>
         )}
         <div
           className={"nav-item subtle drop-target"}
