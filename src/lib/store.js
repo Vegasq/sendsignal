@@ -32,6 +32,19 @@ const articleCache = new Map();
 /** @type {Set<(s: AppState) => void>} */
 const listeners = new Set();
 
+// --- cloud sync (Supabase) ---
+// Lightweight state syncs to the cloud only while a user is signed in. These
+// flags live here so persist() can arm a debounced push without importing
+// sync.js statically — keeps the Node test suite free of the Supabase client.
+/** @type {string | null} current sync user id, or null when signed out */
+let syncUserId = null;
+/** @type {ReturnType<typeof setTimeout> | null} trailing push timer */
+let pushTimer = null;
+/** @type {((uid: string|null)=>void)|null} auth-change subscription */
+let authUnsub = null;
+/** @type {Promise<typeof import('./sync.js')>|null} */
+let syncMod = null;
+
 /** @typedef {Object} Feed
  *  @property {string} id
  *  @property {string} url
@@ -93,6 +106,8 @@ function persist() {
     // Storage full (e.g. huge read set) — read toggles simply won't persist.
     console.warn('persist failed', e);
   }
+  // Arm a debounced cloud push. No-op unless a user is signed in.
+  schedulePush();
 }
 
 function notify() {
@@ -127,6 +142,78 @@ export function getArticles(feedUrl) {
 
 export function allArticles() {
   return [...articleCache.values()];
+}
+
+// --- cloud sync ---
+
+/** Lazily load sync.js so importing store.js never pulls in the Supabase client. */
+async function getSync() {
+  if (!syncMod) syncMod = await import('./sync.js');
+  return syncMod;
+}
+
+/**
+ * Begin listening for auth changes. Once a user signs in, their cloud state is
+ * merged into the local store. Idempotent; call once at startup.
+ */
+export async function startCloudSync() {
+  if (authUnsub) return;
+  const s = await getSync();
+  authUnsub = s.onUserId((uid) => {
+    syncUserId = uid;
+    if (uid) void syncMerge();
+  });
+}
+
+/**
+ * Debounce cloud writes: a read toggle fires persist() many times a minute, so
+ * coalesce them into a single trailing push ~700ms after the last change.
+ */
+function schedulePush() {
+  if (!syncUserId) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(async () => {
+    pushTimer = null;
+    try {
+      const s = await getSync();
+      await s.pushState({
+        feeds: state.feeds,
+        folders: state.folders,
+        read: [...state.read],
+        saved: [...state.saved],
+      });
+    } catch (e) {
+      console.warn('sync: push failed', e);
+    }
+  }, 700);
+}
+
+/**
+ * Merge the signed-in user's cloud state into the local store. Runs once on
+ * login: cloud feeds/folders/read/saved are unioned into local (see
+ * mergeCloudState), the merged result is written back to localStorage, and a
+ * trailing push writes it back to the cloud so the two stay consistent.
+ * No-op when the cloud has no row for this user (local stands).
+ */
+export async function syncMerge() {
+  const s = await getSync();
+  const cloud = await s.pullState();
+  if (!cloud || Object.keys(cloud).length === 0) return;
+  const merged = s.mergeCloudState(
+    {
+      feeds: state.feeds,
+      folders: state.folders,
+      read: [...state.read],
+      saved: [...state.saved],
+    },
+    cloud,
+  );
+  state.feeds = merged.feeds;
+  state.folders = merged.folders;
+  state.read = new Set(merged.read);
+  state.saved = new Set(merged.saved);
+  persist(); // writes merged state to localStorage (and arms the trailing push)
+  notify();
 }
 
 // --- mutations ---

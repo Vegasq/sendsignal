@@ -36,6 +36,7 @@ function eq(a, b, msg) {
 
 const db = await import('../src/lib/db.js');
 const store = await import('../src/lib/store.js');
+const sync = await import('../src/lib/sync.js');
 const refresh = await import('../src/lib/refresh.js');
 const proxy = await import('../src/lib/proxy.js');
 const { selectRow, buildList } = await import('../src/lib/view.js');
@@ -250,6 +251,112 @@ console.log('\naddFeedFromBody — pasted raw XML subscribes with no network');
   eq(f.folder, 'News', 'pasted feed placed in folder');
   ok(f.title === 'Pasted', 'pasted feed title parsed');
   ok(store.getArticles('pasted-feed:test')?.items.length === 1, 'pasted feed item parsed');
+}
+
+// A fake Supabase client: records upserts and returns a canned cloud row.
+// Mirrors exactly the chainable surface sync.js calls (from/select/eq/upsert/
+// single/maybeSingle), so push/pull are exercised with no network.
+function makeMockClient(cloudRow) {
+  const rec = { lastPush: null };
+  // The "table" object returned by from(): carries both select (pull) and
+  // upsert (push), and upsert returns itself so .select().single() chains.
+  const tableApi = {
+    select() {
+      return {
+        eq: () => ({ maybeSingle: async () => ({ data: cloudRow ?? null }) }),
+        single: async () => ({ data: rec.lastPush ?? {}, error: null }),
+      };
+    },
+    upsert(row) {
+      rec.lastPush = row;
+      return tableApi;
+    },
+  };
+  const api = {
+    from() {
+      return tableApi;
+    },
+    auth: { onAuthStateChange: () => () => {}, currentUser: null },
+  };
+  return { api, rec };
+}
+
+console.log('\nsync: mergeCloudState unions feeds/folders/read/saved');
+{
+  const local = {
+    feeds: [{ url: 'local://a', title: 'Local A', folder: '', homePage: '', lastUpdated: '' }],
+    folders: ['LocalF'],
+    read: ['local://a::x'],
+    saved: ['local://a::s'],
+  };
+  const cloud = {
+    feeds: [
+      { url: 'shared://z', title: 'Cloud Z', folder: '', homePage: '', lastUpdated: '' },
+      { url: 'local://a', title: 'Cloud A-wins', folder: 'CloudF', homePage: '', lastUpdated: '' },
+    ],
+    folders: ['CloudF'],
+    read: ['shared://z::y', 'local://a::x'],
+    saved: ['shared://z::s'],
+  };
+  const m = sync.mergeCloudState(local, cloud);
+  eq(m.feeds.map((f) => f.url).sort(), ['local://a', 'shared://z'], 'feeds unioned by url');
+  eq(m.feeds.find((f) => f.url === 'local://a').title, 'Cloud A-wins', 'cloud feed wins on url conflict');
+  eq(m.folders.sort(), ['CloudF', 'LocalF'], 'folders unioned');
+  eq(m.read.sort(), ['local://a::x', 'shared://z::y'], 'read unioned');
+  eq(m.saved.sort(), ['local://a::s', 'shared://z::s'], 'saved unioned');
+}
+
+console.log('\nsync: pushState upserts a user-scoped row; pullState reads it');
+{
+  const { api, rec } = makeMockClient({ feeds: ['cloud://x'], folders: ['CF'], read: ['cloud://x::1'], saved: [] });
+  sync._setClientForTests(api, 'u1');
+  const pulled = await sync.pullState();
+  eq(pulled.feeds, ['cloud://x'], 'pullState returns the cloud row');
+  await sync.pushState({ feeds: [{ url: 'local://y' }], folders: ['LF'], read: ['local://y::1'], saved: [] });
+  ok(rec.lastPush, 'pushState wrote a row');
+  eq(rec.lastPush.user_id, 'u1', 'row scoped to the signed-in user');
+  eq(rec.lastPush.data.feeds[0].url, 'local://y', 'push payload carries feeds');
+  ok(typeof rec.lastPush.updated_at === 'string', 'row carries updated_at');
+}
+
+console.log('\nsync: store.syncMerge unions cloud into local and writes it back');
+{
+  await store.startCloudSync();
+  const cloudRow = {
+    feeds: [{ url: 'cloud://news', title: 'Cloud News', folder: 'Tech', homePage: '', lastUpdated: '' }],
+    folders: ['Tech'],
+    read: ['cloud://news::c1'],
+    saved: ['cloud://news::c1'],
+  };
+  const { api, rec } = makeMockClient(cloudRow);
+  // Seed the user BEFORE any local mutation so persist() arms real pushes.
+  sync._setClientForTests(api, 'user-1');
+
+  // Local state that predates login.
+  await store.ingestFeed('local://blog', makeFeed('local://blog', 2));
+  store.createFolder('Blog');
+  await store.setRead('local://blog::local://blog#0', true);
+
+  await store.syncMerge();
+  const st = store.getState();
+  ok(st.feeds.some((f) => f.url === 'local://blog'), 'local feed preserved through merge');
+  ok(st.feeds.some((f) => f.url === 'cloud://news'), 'cloud feed merged in');
+  eq(st.folders.includes('Blog') && st.folders.includes('Tech'), true, 'folders unioned on merge');
+  ok(
+    st.read.has('local://blog::local://blog#0') && st.read.has('cloud://news::c1'),
+    'read ids unioned on merge',
+  );
+
+  // Trailing debounced push writes the merged state back to the cloud.
+  await new Promise((r) => setTimeout(r, 800));
+  ok(rec.lastPush, 'merged state pushed back to the cloud');
+  eq(rec.lastPush.user_id, 'user-1', 'push scoped to the signed-in user');
+  ok(
+    rec.lastPush.data.feeds.some((f) => f.url === 'local://blog') &&
+      rec.lastPush.data.feeds.some((f) => f.url === 'cloud://news'),
+    'push carries the unioned feeds',
+  );
+  ok(rec.lastPush.data.read.includes('cloud://news::c1'), 'push carries unioned read ids');
 }
 
 console.log(`\n${passes} passed, ${failures} failed\n`);

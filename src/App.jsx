@@ -13,7 +13,9 @@ import {
   createFolder,
   setSaved,
   hydrate,
+  startCloudSync,
 } from './lib/store.js';
+import { initSupabase, signInWithGoogle, signOut, onUserId } from './lib/sync.js';
 import * as refresh from './lib/refresh.js';
 import { buildList, unreadCounts } from './lib/view.js';
 import { timeAgo } from './lib/util.js';
@@ -30,6 +32,25 @@ export default function App() {
   const [selectedKey, setSelectedKey] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [user, setUser] = useState(null);
+
+  // Cloud-sync bootstrap. Register the store's auth listener *before* initSupabase
+  // seeds the current session, so a persisted login merges on this very load.
+  // Both are idempotent, so StrictMode's double-invoke is harmless.
+  useEffect(() => {
+    let mounted = true;
+    const unsub = onUserId((u) => {
+      if (mounted) setUser(u);
+    });
+    void (async () => {
+      await startCloudSync();
+      initSupabase();
+    })();
+    return () => {
+      mounted = false;
+      unsub();
+    };
+  }, []);
 
   useEffect(() => subscribe(setState), []);
 
@@ -191,6 +212,9 @@ export default function App() {
         onSettings={() => setSettingsOpen(true)}
         refresh={state.refresh}
         onRefresh={handleRefresh}
+        user={user}
+        onSignIn={() => void signInWithGoogle()}
+        onSignOut={() => void signOut()}
       />
       <Sidebar
         state={state}
@@ -242,7 +266,7 @@ export default function App() {
   );
 }
 
-function Header({ search, onSearch, theme, onToggleTheme, onSettings, refresh, onRefresh }) {
+function Header({ search, onSearch, theme, onToggleTheme, onSettings, refresh, onRefresh, user, onSignIn, onSignOut }) {
   const running = Boolean(refresh?.running);
   const errCount = refresh ? Object.keys(refresh.errors || {}).length : 0;
   let title = 'Refresh now';
@@ -274,6 +298,11 @@ function Header({ search, onSearch, theme, onToggleTheme, onSettings, refresh, o
         {theme === 'dark' ? '☀' : '☾'}
       </button>
       <button className="icon" onClick={onSettings} title="Settings">⚙</button>
+      {user ? (
+        <button className="icon" onClick={onSignOut} title="Signed in — your feeds sync to the cloud">☁</button>
+      ) : (
+        <button className="icon" onClick={onSignIn} title="Sign in with Google to sync across devices">Sign in</button>
+      )}
     </header>
   );
 }

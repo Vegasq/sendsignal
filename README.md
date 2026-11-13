@@ -1,8 +1,9 @@
 # sscc — a Google Reader-style RSS reader
 
-A feed reader that runs **entirely in the browser**, has **no backend**, and is
-deployed to **GitHub Pages**. Subscriptions, read state, folders, and search are
-all stored locally on the machine that opens the app.
+A feed reader that runs **in the browser** and is deployed to **GitHub Pages**.
+By default it has **no backend** and stores everything locally on the machine
+that opens the app; sign in with **Google** to optionally sync subscriptions,
+folders, and read state across devices via **Supabase**.
 
 ## Design constraints (and what they force)
 
@@ -11,6 +12,7 @@ all stored locally on the machine that opens the app.
 | No backend | No server can fetch feeds for us. Browsers block cross-origin `fetch` to feed URLs (CORS). |
 | GitHub Pages | Pure static output (`dist/`). Deploy = push a branch or a GitHub Action artifact. |
 | Runs in browser | Lightweight state (feeds/folders/read/theme/proxy/interval) lives in `localStorage`; full article bodies live in `IndexedDB` (no 5 MB cap) and survive reloads. |
+| Optional cloud sync | When signed in, the lightweight state also syncs to a per-user `profiles` row in **Supabase** (see [Cloud sync](#cloud-sync-supabase)). Article bodies stay local — they are large, per-device, and re-fetchable. |
 
 ### The CORS problem — and how we solve it
 
@@ -31,6 +33,45 @@ masquerades as a feed.
 
 Feed content is fetched as text and parsed client-side with `DOMParser`
 (`src/lib/feedParser.js`), supporting **RSS 2.0, Atom, and RDF/RSS 1.0**.
+
+## Cloud sync (Supabase)
+
+Signed-in users get cross-device sync. The header's **Sign in** button starts a
+Google OAuth flow; once authenticated, the app's lightweight state — feeds,
+folders, read ids, saved ids — syncs to a single per-user row in a Supabase
+`profiles` table, protected by row-level security so each user can only read and
+write their own row.
+
+- **What syncs:** only the small metadata that defines your library. Full article
+  bodies stay in `IndexedDB` (local) — they are large, per-device, and
+  re-fetchable through the proxy, so syncing them would waste the free tier.
+- **Merge policy** (`src/lib/sync.js` → `mergeCloudState`): feeds are unioned by
+  URL with the cloud copy winning on a conflict (the cloud is the authoritative
+  library), but feeds added only locally are preserved; folders / read / saved
+  are unioned, so an item marked read on one device shows as read everywhere.
+  On any change the merged state is written back, keeping local and cloud in
+  step. Writes are debounced so a burst of read toggles becomes one push.
+- **What it needs:** two env vars, `VITE_SUPABASE_URL` and
+  `VITE_SUPABASE_ANON_KEY` (copy from your project's **Settings → API**; see
+  `.env.example`). Leave them blank and the app runs as a pure local, no-backend
+  reader — sync simply stays disabled.
+- **Setup:**
+  1. Create a Supabase project, then run `supabase db push` (CLI) to apply the
+     migrations in `supabase/migrations/`. It creates the `profiles` table, the
+     owner-only RLS policies, and the `updated_at` trigger. The table starts with
+     RLS **off** until the migration explicitly enables it — the migration does
+     both, so a plain `CREATE POLICY` without `ENABLE ROW LEVEL SECURITY` would
+     leave every row open to the anon key.
+  2. **Google auth:** in Google Cloud Console create an OAuth 2.0 Web client and
+     register the callback `https://<project-ref>.supabase.co/auth/v1/callback`.
+     Set the client **id** in `supabase/config.toml` under
+     `[auth.external.google]` → `client_id`, set the **secret** via the
+     `SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET` env var (or a `.env` file), set
+     `enabled = true`, then `supabase db push`.
+  3. Add `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` to a `.env` locally, and
+     as **Repository secrets** with the same names so the deploy Action bundles
+     them into the build. (The anon key is safe to ship: RLS, not the key,
+     enforces isolation.)
 
 ## Architecture
 
@@ -84,6 +125,9 @@ Browser SPA (React + Vite static build)
   works offline after the first load.
 - Dark mode; all preferences persisted locally.
 - Offline after first load (static assets + IndexedDB cache).
+- Cross-device sync via **Google login** (Supabase): subscriptions, folders, and
+  read state follow you between machines; article bodies stay local. See
+  [Cloud sync](#cloud-sync-supabase).
 
 ## Roadmap
 
@@ -92,6 +136,7 @@ Browser SPA (React + Vite static build)
 | MVP | Feed fetch/parse, folders, read state, search | done |
 | MVP | IndexedDB for article bodies | persist full content across reloads | done |
 | MVP | Periodic + on-visible refresh | throttled per feed; manual override | done |
+| P2 | Cloud sync (Supabase) + Google login | per-user `profiles` table; lightweight state syncs, article bodies stay local | done |
 | P2 | Self-hosted proxy option + `:8080` dev proxy | removes public-proxy rate limits |
 | P3 | Infinite scroll / virtualized long lists | >1000 items |
 | P3 | Reading time, "only unread", sort by date | UX |

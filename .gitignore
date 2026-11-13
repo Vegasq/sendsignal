@@ -9,6 +9,10 @@ dist-ssr/
 *.local
 .vite/
 
+# Local Supabase credentials (keep .env.example committed)
+.env
+.env.google
+
 # Editor / OS
 .DS_Store
 *.log
