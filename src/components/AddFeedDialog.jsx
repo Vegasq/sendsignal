@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { addFeed } from '../lib/store.js';
+import { addFeed, addFeedFromBody } from '../lib/store.js';
 
 export default function AddFeedDialog({ folders, onClose, onAdded }) {
   const [url, setUrl] = useState('');
@@ -17,13 +17,21 @@ export default function AddFeedDialog({ folders, onClose, onAdded }) {
       setError('Enter a feed URL.');
       return;
     }
-    // Allow pasting raw XML too.
-    const feedUrl = target.startsWith('<') ? 'pasted-feed' : normalizeUrl(target);
+    const targetFolder = useNew ? newFolder.trim() : folder;
     setBusy(true);
     setError('');
     try {
-      await addFeed(feedUrl, useNew ? newFolder.trim() : folder);
-      onAdded(target, useNew ? newFolder.trim() : folder);
+      if (target.startsWith('<')) {
+        // Pasted raw XML: parse locally, no network. Synthetic key since there's
+        // no origin URL to fetch.
+        const feedUrl =
+          'pasted-feed:' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+        await addFeedFromBody(feedUrl, target, targetFolder);
+        onAdded(feedUrl, targetFolder);
+      } else {
+        await addFeed(normalizeUrl(target), targetFolder);
+        onAdded(target, targetFolder);
+      }
     } catch (err) {
       setError('Could not subscribe: ' + err.message);
     } finally {

@@ -205,5 +205,52 @@ console.log('\nimportOPML — a broken (non-XML) feed is skipped, valid feeds st
   ok(!store.getState().feeds.some((f) => f.url === 'https://broken.example/rss'), 'broken feed not subscribed');
 }
 
+console.log('\nexportOPML — uncategorized feeds are included and round-trip through import');
+{
+  // Fresh import (mocked fetch) of an OPML with an uncategorized + a foldered feed.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => GOOD_RSS });
+  const r = await store.importOPML(
+    `<?xml version="1.0"?><opml version="2.0"><body>` +
+      `<outline xmlUrl="https://uncat.example/rss" text="Uncat"/>` +
+      `<outline text="News"><outline xmlUrl="https://cat.example/rss" text="Cat"/></outline>` +
+      `</body></opml>`,
+  );
+  globalThis.fetch = realFetch;
+  eq(r.count, 2, 'both feeds imported');
+  const opml = store.exportOPML();
+  ok(opml.includes('https://uncat.example/rss'), 'uncategorized feed exported flat');
+  ok(opml.includes('https://cat.example/rss'), 'foldered feed exported');
+  ok(opml.includes('<outline text="News"'), 'folder group exported');
+  // Round-trip: re-import the export; both feeds survive with folders intact.
+  await store.importOPML(opml);
+  ok(
+    store.getState().feeds.some((f) => f.url === 'https://uncat.example/rss' && !f.folder),
+    'uncategorized feed survives round-trip uncategorized',
+  );
+  ok(
+    store.getState().feeds.some((f) => f.url === 'https://cat.example/rss' && f.folder === 'News'),
+    'foldered feed survives round-trip in its folder',
+  );
+}
+
+console.log('\naddFeedFromBody — pasted raw XML subscribes with no network');
+{
+  // No network: if a fetch were attempted it would hit the real internet.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('network should not be used'); };
+  const body = `<?xml version="1.0"?><rss version="2.0"><channel>
+    <title>Pasted</title><link>https://pasted.example</link><description>p</description>
+    <item><title>p0</title><link>https://pasted.example?i=0</link><guid>https://pasted.example#0</guid><pubDate>${new Date().toUTCString()}</pubDate></item>
+  </channel></rss>`;
+  await store.addFeedFromBody('pasted-feed:test', body, 'News');
+  globalThis.fetch = realFetch;
+  const f = store.getState().feeds.find((x) => x.url === 'pasted-feed:test');
+  ok(f, 'pasted feed subscribed');
+  eq(f.folder, 'News', 'pasted feed placed in folder');
+  ok(f.title === 'Pasted', 'pasted feed title parsed');
+  ok(store.getArticles('pasted-feed:test')?.items.length === 1, 'pasted feed item parsed');
+}
+
 console.log(`\n${passes} passed, ${failures} failed\n`);
 process.exit(failures ? 1 : 0);

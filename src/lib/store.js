@@ -236,22 +236,44 @@ export async function addFeed(url, folder = '') {
 }
 
 /**
+ * Subscribe to a feed from an already-fetched body (e.g. pasted XML) with no
+ * network. Mirrors addFeed's push+ingest path but takes the body directly.
+ * `url` is a synthetic key (pasted feeds have no origin URL).
+ * @param {string} url synthetic url key
+ * @param {string} body raw feed XML
+ * @param {string} [folder]
+ * @returns {Promise<Feed>}
+ */
+export async function addFeedFromBody(url, body, folder = '') {
+  const normalized = parseFeed(body, url);
+  const feed = {
+    id: 'f_' + shortId(url),
+    url,
+    title: normalized.title || url,
+    folder,
+    homePage: normalized.homePage || url,
+    lastUpdated: '',
+  };
+  state.feeds.push(feed);
+  await ingest(url, normalized);
+  persist();
+  notify();
+  return feed;
+}
+
+/**
  * Re-fetch an existing feed and refresh its cached items.
  * @param {string} feedUrl
  */
 export async function refreshFeed(feedUrl) {
   const feed = findFeed(feedUrl);
   if (!feed) return;
-  try {
-    const { fetchFeedText } = await import('./proxy.js');
-    const { body } = await fetchFeedText(feedUrl, new AbortController().signal);
-    const parsed = parseFeed(body, feedUrl);
-    await ingest(feedUrl, parsed);
-    persist();
-    notify();
-  } catch (e) {
-    throw e;
-  }
+  const { fetchFeedText } = await import('./proxy.js');
+  const { body } = await fetchFeedText(feedUrl, new AbortController().signal);
+  const parsed = parseFeed(body, feedUrl);
+  await ingest(feedUrl, parsed);
+  persist();
+  notify();
 }
 
 /**
@@ -349,12 +371,12 @@ export function setRefreshStatus(partial) {
 // --- OPML ---
 
 export function exportOPML() {
-  const groups = state.feeds
-    .filter((f) => f.folder)
-    .reduce((acc, f) => {
-      (acc[f.folder] ||= []).push(f);
-      return acc;
-    }, {});
+  const groups = {};
+  const uncategorized = [];
+  for (const f of state.feeds) {
+    if (f.folder) (groups[f.folder] ||= []).push(f);
+    else uncategorized.push(f);
+  }
 
   const parts = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -362,7 +384,16 @@ export function exportOPML() {
     '<head><title>sscc subscriptions</title></head>',
     '<body>',
   ];
-  for (const folder of Object.keys(groups)) {
+  // Uncategorized feeds render flat, directly under <body>, so they re-import
+  // with folder "" (their <body> parent has no text/title). Previously feeds
+  // with no folder were dropped from export entirely — data loss on re-import.
+  for (const f of uncategorized) {
+    parts.push(
+      `<outline type="rss" text="${esc(f.title)}" title="${esc(f.title)}" ` +
+        `xmlUrl="${esc(f.url)}" htmlUrl="${esc(f.homePage)}" />`,
+    );
+  }
+  for (const folder of Object.keys(groups).sort()) {
     parts.push(`<outline text="${esc(folder)}" title="${esc(folder)}">`);
     for (const f of groups[folder]) {
       parts.push(
