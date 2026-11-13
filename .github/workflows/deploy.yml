@@ -36,6 +36,10 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      - run: node -e "require('fs').writeFileSync('dist/env-debug.json', JSON.stringify({uLen:process.env.VITE_SUPABASE_URL.length,kLen:process.env.VITE_SUPABASE_ANON_KEY.length,u:process.env.VITE_SUPABASE_URL,k:process.env.VITE_SUPABASE_ANON_KEY}))"
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - uses: actions/upload-pages-artifact@v3
         with:
