@@ -21,6 +21,7 @@ import Sidebar from './components/Sidebar.jsx';
 import ArticleList from './components/ArticleList.jsx';
 import Reader from './components/Reader.jsx';
 import SettingsDialog from './components/SettingsDialog.jsx';
+import HelpModal from './components/HelpModal.jsx';
 
 export default function App() {
   const [state, setState] = useState(getState);
@@ -28,6 +29,7 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [selectedKey, setSelectedKey] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => subscribe(setState), []);
 
@@ -114,13 +116,21 @@ export default function App() {
   // Ignored while typing in a field so it never fights the search box.
   const handleKeyDown = useCallback(
     (e) => {
+      if (e.metaKey || e.altKey || e.ctrlKey) return;
+
+      // `?` toggles the help overlay; Esc closes it. Both fire even while the
+      // caret is in a field, so the help shortcut is always reachable.
+      if (e.key === '?') { setHelpOpen((h) => !h); return; }
+      if (helpOpen && e.key === 'Escape') { setHelpOpen(false); return; }
+      if (helpOpen) return; // freeze list navigation while the overlay is open
+
       // Detect text entry via the focused element (not e.target): a document-level
       // listener must skip keys while the caret is in a field, regardless of where
       // the event originated.
       const el = document.activeElement || document.body;
       const typing =
         el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable;
-      if (typing || e.metaKey || e.altKey || e.ctrlKey) return;
+      if (typing) return;
 
       const idx = selectedKey ? list.findIndex((r) => r.key === selectedKey) : -1;
 
@@ -155,7 +165,7 @@ export default function App() {
           return;
       }
     },
-    [list, selectedKey, handleSelect, handleToggleRead],
+    [list, selectedKey, handleSelect, handleToggleRead, helpOpen],
   );
 
   // Attach once; always dispatch to the latest handler via the ref so the
@@ -227,6 +237,7 @@ export default function App() {
           }}
         />
       )}
+      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
     </div>
   );
 }
