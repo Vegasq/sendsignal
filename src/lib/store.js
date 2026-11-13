@@ -13,12 +13,16 @@ const KEY = 'sscc.v1';
 import { parseFeed } from './feedParser.js';
 import { saveFeed, loadAllFeeds, deleteFeed } from './db.js';
 
-/** @type {{feeds: Feed[], read: Set<string>, theme: 'light'|'dark', proxy: string, refresh: RefreshStatus}} */
+/**
+ * @type {{feeds: Feed[], read: Set<string>, saved: Set<string>, theme: 'light'|'dark', proxy: string, folders: string[], refresh: RefreshStatus}}
+ */
 let state = {
   feeds: [],
   read: new Set(),
+  saved: new Set(),
   theme: 'dark',
   proxy: '',
+  folders: [],
   refresh: { lastRun: '', intervalMs: 30 * 60 * 1000, running: false, errors: {} },
 };
 
@@ -39,6 +43,7 @@ const listeners = new Set();
 /** @typedef {Object} AppState
  *  @property {Feed[]} feeds
  *  @property {Set<string>} read
+ *  @property {Set<string>} saved
  *  @property {'light'|'dark'} theme
  *  @property {string} proxy
  *  @property {string[]} folders */
@@ -56,8 +61,10 @@ function load() {
     const data = JSON.parse(raw);
     state.feeds = Array.isArray(data.feeds) ? data.feeds : [];
     state.read = new Set(Array.isArray(data.read) ? data.read : []);
+    state.saved = new Set(Array.isArray(data.saved) ? data.saved : []);
     state.theme = data.theme === 'light' ? 'light' : 'dark';
     state.proxy = typeof data.proxy === 'string' ? data.proxy : '';
+    state.folders = Array.isArray(data.folders) ? data.folders : [];
     // intervalMs is a preference (persisted); lastRun/errors are runtime only.
     state.refresh = {
       lastRun: '',
@@ -76,8 +83,10 @@ function persist() {
     localStorage.setItem(KEY, JSON.stringify({
       feeds: state.feeds,
       read: [...state.read],
+      saved: [...state.saved],
       theme: state.theme,
       proxy: state.proxy,
+      folders: state.folders,
       intervalMs: state.refresh.intervalMs,
     }));
   } catch (e) {
@@ -96,10 +105,15 @@ export function subscribe(fn) {
 }
 
 export function getState() {
-  const folders = [...new Set(state.feeds.map((f) => f.folder))].filter(Boolean).sort();
+  // Folders come from explicit creation (persisted) and from feeds assigned to
+  // a folder; union both so explicitly-created empty folders survive reloads and
+  // feeds still surface their folder even if it was never created by name.
+  const derived = [...new Set(state.feeds.map((f) => f.folder))].filter(Boolean);
+  const folders = [...new Set([...state.folders, ...derived])].filter(Boolean).sort();
   return {
     feeds: state.feeds,
     read: state.read,
+    saved: state.saved,
     theme: state.theme,
     proxy: state.proxy,
     folders,
@@ -263,6 +277,14 @@ export function setRead(id, isRead) {
   notify();
 }
 
+/** Bookmark an item (row key) as saved. Persisted so Saved survives reloads. */
+export function setSaved(id, saved) {
+  if (saved) state.saved.add(id);
+  else state.saved.delete(id);
+  persist();
+  notify();
+}
+
 export function markAllRead(target) {
   const feeds =
     target === 'all'
@@ -284,6 +306,15 @@ export function moveFeed(feedUrl, folder) {
     persist();
     notify();
   }
+}
+
+/** Create a (possibly empty) folder by name. Idempotent; trims whitespace. */
+export function createFolder(name) {
+  const n = (name || '').trim();
+  if (!n || state.folders.includes(n)) return;
+  state.folders.push(n);
+  persist();
+  notify();
 }
 
 export function removeFeed(feedUrl) {

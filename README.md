@@ -67,7 +67,13 @@ Browser SPA (React + Vite static build)
 
 - Subscribe by feed URL (auto-detects RSS/Atom/RDF).
 - OPML import/export (Google Reader / Feedly migration).
-- Folders to group feeds.
+- Folders to group feeds. Create folders inline with the **+** button and drag
+  feeds into a folder — or into **Uncategorized** at the bottom of the sidebar.
+- Save (bookmark) any post with a ★; saved posts live in a dedicated **Saved**
+  folder and survive reloads.
+- vi / Google-Reader hotkeys: `j`/`k` (or ↓/↑) move through the list, `g`/`G`
+  (or Home/End) jump to the top/bottom, `x` marks read, `u` marks unread. They
+  are ignored while the cursor is in a field (e.g. the search box).
 - Unread counts per feed; mark individual or all as read.
 - Full-text reader with prev/next and in-reader read toggles.
 - Full-text search across subscribed feeds.
@@ -90,7 +96,7 @@ Browser SPA (React + Vite static build)
 | P3 | Infinite scroll / virtualized long lists | >1000 items |
 | P3 | Reading time, "only unread", sort by date | UX |
 | P3 | Service Worker for true background fetch | background refresh needs a proxy |
-| P4 | Keyboard shortcuts (g a g u j k) | Google Reader muscle memory |
+| P4 | Keyboard shortcuts (g a g u j k) | Google Reader muscle memory | done |
 | P4 | Push notifications for new items | needs a background fetch source |
 
 ## Deploy to GitHub Pages
@@ -99,8 +105,23 @@ Browser SPA (React + Vite static build)
 2. Vite build emits `dist/`. Use the GitHub Action in
    `.github/workflows/deploy.yml` (or push `dist/` to a `gh-pages` branch).
 3. **Subpath note:** if deployed at `github.com/<user>/sscc/`, set `base: '/sscc/'`
-   in `vite.config.js` (already done for this repo name). For a root site
-   (`github.com/<user>/`) set `base: '/'`.
+   in `vite.config.js` (override with `VITE_GH_BASE='/sscc/'` in the workflow).
+   For a root site (`github.com/<user>/`) set `base: '/'`.
+
+### Custom domain (e.g. `sendsignal.cc`)
+
+This app is intended to run as a **root Pages site** on a custom domain, so the
+default `base` is `/` (assets load from `/assets/…`). To deploy:
+
+1. In **Settings → Pages**, set the source to your branch and, under
+   **Custom domain**, enter `sendsignal.cc`.
+2. Point the domain at GitHub in DNS: a `CNAME` `sendsignal.cc → <user>.github.io`
+   (and A records `185.199.108.153`, `185.199.109.153`, `185.199.110.153`,
+   `185.199.111.153` for an apex/`@` record if your provider needs it).
+3. Add a `CNAME` file at the repo root containing `sendsignal.cc` so GitHub
+   verifies ownership.
+4. Back in Pages, enable **Enforce HTTPS** (wait for the DNS/CNAME to propagate).
+
 
 ## Develop
 

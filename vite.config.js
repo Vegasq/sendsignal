@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// GitHub Pages deploys the app at a subpath equal to the repo name.
-// For a root site (github.com/<user>/) set base to '/'.
-const base = process.env.VITE_GH_BASE || '/sscc/';
+// Deployed to the custom domain (sendsignal.cc) as a root Pages site, so assets
+// load from '/'. For a repo/user subpath (github.com/<user>/sscc/) set
+// VITE_GH_BASE to '/sscc/' instead.
+const base = process.env.VITE_GH_BASE || '/';
 
 export default defineConfig({
   base,

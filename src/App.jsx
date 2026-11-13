@@ -10,6 +10,8 @@ import {
   removeFeed,
   addFeed,
   moveFeed,
+  createFolder,
+  setSaved,
   hydrate,
 } from './lib/store.js';
 import * as refresh from './lib/refresh.js';
@@ -84,6 +86,10 @@ export default function App() {
     if (!isRead && selectedKey === key) setSelectedKey(null);
   }, [selectedKey]);
 
+  const handleSave = useCallback((key, saved) => {
+    setSaved(key, saved);
+  }, []);
+
   const handleMarkAllRead = useCallback((v) => {
     if (v.kind === 'feed') markAllRead(v.name);
     else if (v.kind === 'folder') markAllRead(state.feeds.filter((f) => f.folder === v.name).map((f) => f.url));
@@ -101,6 +107,68 @@ export default function App() {
 
   const handleRefresh = useCallback(() => {
     return refresh.refreshNow();
+  }, []);
+
+  // Keyboard navigation (Google Reader style): j/k or arrows move selection
+  // through the current list, g/G jump to the ends, x/u mark read/unread.
+  // Ignored while typing in a field so it never fights the search box.
+  const handleKeyDown = useCallback(
+    (e) => {
+      // Detect text entry via the focused element (not e.target): a document-level
+      // listener must skip keys while the caret is in a field, regardless of where
+      // the event originated.
+      const el = document.activeElement || document.body;
+      const typing =
+        el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable;
+      if (typing || e.metaKey || e.altKey || e.ctrlKey) return;
+
+      const idx = selectedKey ? list.findIndex((r) => r.key === selectedKey) : -1;
+
+      switch (e.key) {
+        case 'j':
+        case 'ArrowDown': {
+          const i = idx >= 0 ? Math.min(idx + 1, list.length - 1) : 0;
+          if (list[i]) { handleSelect(list[i]); e.preventDefault(); }
+          break;
+        }
+        case 'k':
+        case 'ArrowUp': {
+          const i = idx > 0 ? idx - 1 : 0;
+          if (list[i]) { handleSelect(list[i]); e.preventDefault(); }
+          break;
+        }
+        case 'g':
+        case 'Home':
+          if (list[0]) { handleSelect(list[0]); e.preventDefault(); }
+          break;
+        case 'G':
+        case 'End':
+          if (list[list.length - 1]) { handleSelect(list[list.length - 1]); e.preventDefault(); }
+          break;
+        case 'x':
+          if (idx >= 0) { handleToggleRead(list[idx].key, true); e.preventDefault(); }
+          break;
+        case 'u':
+          if (idx >= 0) { handleToggleRead(list[idx].key, false); e.preventDefault(); }
+          break;
+        default:
+          return;
+      }
+    },
+    [list, selectedKey, handleSelect, handleToggleRead],
+  );
+
+  // Attach once; always dispatch to the latest handler via the ref so the
+  // listener never closes over stale list/selectedKey.
+  const keyHandlerRef = useRef(handleKeyDown);
+  useEffect(() => {
+    keyHandlerRef.current = handleKeyDown;
+  }, [handleKeyDown]);
+
+  useEffect(() => {
+    const onKey = (e) => keyHandlerRef.current(e);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, []);
 
   return (
@@ -123,6 +191,7 @@ export default function App() {
         onSettings={() => setSettingsOpen(true)}
         onRemoveFeed={handleRemoveFeed}
         onMoveFeed={(url, folder) => moveFeed(url, folder)}
+        onCreateFolder={(name) => createFolder(name)}
       />
       <ArticleList
         state={state}
@@ -131,6 +200,7 @@ export default function App() {
         keepRead={keepRead}
         onSelect={handleSelect}
         onMarkAllRead={handleMarkAllRead}
+        onSave={handleSave}
       />
       <Reader
         state={state}
@@ -141,6 +211,7 @@ export default function App() {
         onSelect={handleSelect}
         onToggleRead={handleToggleRead}
         onOpenOriginal={handleOpenOriginal}
+        onSave={handleSave}
       />
       {settingsOpen && (
         <SettingsDialog

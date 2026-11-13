@@ -12,7 +12,12 @@ export function buildList(state, view, search, keepRead = false) {
   const feeds = allArticles();
   const q = (search || '').toLowerCase().trim();
   const read = state.read;
+  const saved = state.saved;
 
+  // "Saved" is a synthetic view: rows whose key is bookmarked, regardless of
+  // read state. Feeds dropped from the cache are naturally excluded, so a saved
+  // key whose feed was unsubscribed simply stops listing.
+  const isSavedView = view.kind === 'saved';
   const selectedUrls =
     view.kind === 'feed'
       ? [view.name]
@@ -28,6 +33,7 @@ export function buildList(state, view, search, keepRead = false) {
     for (const item of feed.items) {
       const key = feed.url + '::' + item.id;
       const isRead = read.has(key);
+      if (isSavedView && !saved.has(key)) continue;
       if (onlyUnread && isRead && !keepRead) continue;
       if (q) {
         const hay = (item.title + ' ' + item.author + ' ' + plain(item.content)).toLowerCase();
@@ -66,20 +72,24 @@ export function selectRow(list, selectedKey, prev) {
 }
 
 /**
- * Unread counts keyed by feed url, plus synthetic keys "unread" and
- * "folder::<name>" for the sidebar aggregates.
+ * Unread counts keyed by feed url, plus synthetic keys "unread",
+ * "folder::<name>", and "saved" (total bookmarked items) for the sidebar.
  */
 export function unreadCounts(state) {
   const counts = {};
+  let savedCount = 0;
   for (const feed of allArticles()) {
     let n = 0;
     for (const item of feed.items) {
-      if (!state.read.has(feed.url + '::' + item.id)) n++;
+      const key = feed.url + '::' + item.id;
+      if (!state.read.has(key)) n++;
+      if (state.saved.has(key)) savedCount++;
     }
     counts[feed.url] = n;
     const folder = folderOf(state, feed.url);
     if (folder) counts['folder::' + folder] = (counts['folder::' + folder] || 0) + n;
   }
+  counts['saved'] = savedCount;
   return counts;
 }
 

@@ -1,9 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { setRead } from '../lib/store.js';
 import { selectRow } from '../lib/view.js';
 import { timeAgo } from '../lib/util.js';
 
-export default function Reader({ state, view, search, list, selectedKey, onSelect, onToggleRead, onOpenOriginal }) {
+export default function Reader({ state, view, search, list, selectedKey, onSelect, onToggleRead, onOpenOriginal, onSave }) {
   // Auto-mark-read removes the viewed article from the unread-only list, so the
   // selection context must persist across renders: keep showing the selected
   // article (and its Previous/Next neighbors) until selection changes.
@@ -24,6 +23,7 @@ export default function Reader({ state, view, search, list, selectedKey, onSelec
   const { item, feedUrl } = row;
   const ft = state.feeds.find((f) => f.url === feedUrl)?.title || feedUrl;
   const key = row.key;
+  const isSaved = Boolean(state.saved && state.saved.has(key));
 
   return (
     <div className="reader">
@@ -31,6 +31,9 @@ export default function Reader({ state, view, search, list, selectedKey, onSelec
         <div className="r-actions">
           <button onClick={() => onToggleRead(key, !row.isRead)}>
             {row.isRead ? '↩ Mark unread' : '✓ Mark read'}
+          </button>
+          <button onClick={() => onSave(key, !isSaved)}>
+            {isSaved ? '★ Saved' : '☆ Save'}
           </button>
           <button onClick={() => onOpenOriginal(item.link)} disabled={!item.link}>
             Open original ↗

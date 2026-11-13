@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { createFolder } from '../lib/store.js';
 import AddFeedDialog from './AddFeedDialog.jsx';
 import ImportDialog from './ImportDialog.jsx';
+import ContextMenu from './ContextMenu.jsx';
 
 export default function Sidebar({
   state,
@@ -8,6 +10,7 @@ export default function Sidebar({
   onView,
   unreadCounts,
   onAddFeed,
+  onCreateFolder,
   onSettings,
   onRemoveFeed,
   onMoveFeed,
@@ -15,8 +18,30 @@ export default function Sidebar({
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [menu, setMenu] = useState(null); // { url, x, y }
+  const [creating, setCreating] = useState(false); // inline new-folder input
+  const [newFolder, setNewFolder] = useState('');
+  // Drag-and-drop: which feed is being dragged, and which drop target is hovered
+  // (folder name, or '' for the Uncategorized zone).
+  const [dragFeedUrl, setDragFeedUrl] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
 
   const allUnread = Object.values(unreadCounts).reduce((a, b) => a + b, 0);
+
+  function submitFolder(e) {
+    if (e) e.preventDefault();
+    const name = newFolder.trim();
+    if (name) onCreateFolder(name);
+    setNewFolder('');
+    setCreating(false);
+  }
+
+  function handleDrop(e, folder) {
+    e.preventDefault();
+    const url = e.dataTransfer.getData('text/plain');
+    if (url) onMoveFeed(url, folder);
+    setDragFeedUrl(null);
+    setDropTarget(null);
+  }
 
   return (
     <aside className="sidebar">
@@ -33,26 +58,53 @@ export default function Sidebar({
           <span className="label">Unread</span>
           <span className="count">{allUnread}</span>
         </div>
+        <div className={"nav-item " + (view.kind === 'saved' ? 'active' : '')}
+           onClick={() => onView({ kind: 'saved', name: null })}
+           title="Saved articles">
+          <span className="dot" />
+          <span className="label">Saved</span>
+          <span className="count">{unreadCounts.saved || 0}</span>
+        </div>
       </div>
 
       <div className="side-section">
         <div className="side-heading">
           <span>Folders</span>
-          <span className="add-btn" title="Add folder" style={{ cursor: 'pointer' }}>+</span>
+          <span className="add-btn" title="Add folder" style={{ cursor: 'pointer' }}
+             onClick={() => { setCreating(true); setNewFolder(''); }}>+</span>
         </div>
+        {creating && (
+          <form className="new-folder-form" onSubmit={submitFolder} onMouseDown={(e) => e.stopPropagation()}>
+            <input
+              className="new-folder-input"
+              placeholder="Folder name"
+              autoFocus
+              value={newFolder}
+              onChange={(e) => setNewFolder(e.target.value)}
+              onBlur={submitFolder}
+            />
+            <span className="new-folder-cancel" title="Cancel (Esc)"
+              onMouseDown={(e) => { e.stopPropagation(); setCreating(false); setNewFolder(''); }}>✕</span>
+          </form>
+        )}
         {state.folders.map((folder) => {
           const count = unreadCounts['folder::' + folder] || 0;
+          const isDrop = dropTarget === folder;
           return (
-            <div key={folder}
-              className={"nav-item " + (view.kind === 'folder' && view.name === folder ? 'active' : '')}
-              onClick={() => onView({ kind: 'folder', name: folder })}>
+            <div
+              key={folder}
+              className={"nav-item drop-target" + (isDrop ? ' drop-active' : '') + (view.kind === 'folder' && view.name === folder ? ' active' : '')}
+              onClick={() => onView({ kind: 'folder', name: folder })}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTarget(folder); }}
+              onDragLeave={() => { if (dropTarget === folder) setDropTarget(null); }}
+              onDrop={(e) => handleDrop(e, folder)}>
               <span className="dot" />
               <span className="label">{folder}</span>
               <span className="count">{count}</span>
             </div>
           );
         })}
-        {state.folders.length === 0 && (
+        {state.folders.length === 0 && !creating && (
           <div style={{ color: 'var(--fg-muted)', fontSize: 12, padding: '4px 12px' }}>No folders yet</div>
         )}
       </div>
@@ -64,10 +116,19 @@ export default function Sidebar({
         </div>
         {state.feeds.map((feed) => {
           const count = unreadCounts[feed.url] || 0;
+          const isDragged = dragFeedUrl === feed.url;
           return (
-            <div key={feed.id}
-              className={"nav-item " + (view.kind === 'feed' && view.name === feed.url ? 'active' : '') + (count ? ' has-unread' : '')}
+            <div
+              key={feed.id}
+              draggable
+              className={"nav-item" + (view.kind === 'feed' && view.name === feed.url ? ' active' : '') + (count ? ' has-unread' : '') + (isDragged ? ' dragging' : '')}
               onClick={() => onView({ kind: 'feed', name: feed.url })}
+              onDragStart={(e) => {
+                e.dataTransfer.setData('text/plain', feed.url);
+                e.dataTransfer.effectAllowed = 'move';
+                setDragFeedUrl(feed.url);
+              }}
+              onDragEnd={() => { setDragFeedUrl(null); setDropTarget(null); }}
               onContextMenu={(e) => { e.preventDefault(); setMenu({ url: feed.url, x: e.clientX, y: e.clientY }); }}
               title={feed.url}>
               <span className="dot" />
@@ -83,6 +144,15 @@ export default function Sidebar({
             No feeds. Click + to subscribe.
           </div>
         )}
+        <div
+          className={"nav-item subtle drop-target" + (dropTarget === '' ? ' drop-active' : '')}
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTarget(''); }}
+          onDragLeave={() => { if (dropTarget === '') setDropTarget(null); }}
+          onDrop={(e) => handleDrop(e, '')}
+          title="Drop a feed here to remove it from its folder">
+          <span className="dot" />
+          <span className="label">Uncategorized</span>
+        </div>
       </div>
 
       <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', display: 'flex', gap: 8 }}>
@@ -125,5 +195,3 @@ const ghostBtn = {
   fontSize: 12,
   flex: 1,
 };
-
-import ContextMenu from './ContextMenu.jsx';
