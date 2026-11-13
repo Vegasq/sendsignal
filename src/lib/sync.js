@@ -120,12 +120,18 @@ export async function signOut() {
  */
 export async function pushState(data) {
   if (!client || !userId) return;
+  const feedCount = Array.isArray(data?.feeds) ? data.feeds.length : 0;
   const { error } = await client
     .from(TABLE)
     .upsert({ user_id: userId, data, updated_at: new Date().toISOString() })
     .select('user_id')
     .single();
-  if (error) console.warn('sync: push failed', error);
+  if (error) {
+    console.warn('sync: push failed', error);
+  } else {
+    // DIAGNOSTIC (remove after cross-sync debug): report what actually reached the cloud.
+    console.log(`sync:push ok user=${userId} feeds=${feedCount}`);
+  }
 }
 
 /**
@@ -144,6 +150,9 @@ export async function pullState() {
     console.warn('sync: pull failed', error);
     return {};
   }
+  // DIAGNOSTIC (remove after cross-sync debug): report what the cloud actually returned.
+  const feedCount = data && Array.isArray(data.feeds) ? data.feeds.length : 0;
+  console.log(`sync:pull ${data ? 'row' : 'none'} user=${userId} feeds=${feedCount}`);
   return data ?? {};
 }
 
