@@ -7,19 +7,22 @@
 //
 //   npm test
 
+// --- DOMParser for OPML parsing (plain Node has no DOM) ---
 import 'fake-indexeddb/auto.js';
+import { JSDOM } from 'jsdom';
 
 // --- in-memory localStorage shim (store.js reads/writes it) ---
 class MemStorage {
   constructor() { this.m = new Map(); }
   getItem(k) { return this.m.has(k) ? this.m.get(k) : null; }
-  setItem(k, v) { this.m.set(k, String(v)); }
+  setItem(k, v) { return this.m.set(k, String(v)); }
   removeItem(k) { this.m.delete(k); }
   clear() { this.m.clear(); }
   key(i) { return [...this.m.keys()][i] ?? null; }
   get length() { return this.m.size; }
 }
 globalThis.localStorage = new MemStorage();
+globalThis.DOMParser = new JSDOM().window.DOMParser;
 
 let failures = 0;
 let passes = 0;
@@ -169,6 +172,37 @@ console.log('\nsidebar grouping — feeds partition under their folder vs uncate
   eq(uncategorized.some((f) => f.url === 'feed://m2'), true, 'uncategorized list holds the uncategorized feed');
   eq(uncategorized.some((f) => f.url === 'feed://m1'), false, 'a grouped feed is not also uncategorized');
   eq(feeds.every((f) => f.folder === '' || f.folder === 'News'), true, 'every feed lands in exactly one group');
+}
+
+// A valid RSS 2.0 body the mocked fetch returns for a healthy feed.
+const GOOD_RSS = `<?xml version="1.0"?>
+<rss version="2.0"><channel>
+  <title>Good Feed</title><link>https://good.example</link><description>g</description>
+  <item><title>g0</title><link>https://good.example?i=0</link><guid>https://good.example#0</guid><pubDate>${new Date().toUTCString()}</pubDate></item>
+</channel></rss>`;
+
+console.log('\nimportOPML — a broken (non-XML) feed is skipped, valid feeds still import');
+{
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const u = String(input);
+    // The Reddit-style feed that the proxy rendered as HTML (non-XML).
+    if (u.includes('broken.example')) {
+      return { ok: true, status: 200, text: async () => '<html><body>not a feed</body></html>' };
+    }
+    return { ok: true, status: 200, text: async () => GOOD_RSS };
+  };
+  const opml = `<?xml version="1.0"?>
+<opml version="2.0"><body>
+  <outline text="Tech"><outline xmlUrl="https://good.example/rss" text="Good"/></outline>
+  <outline text="Misc"><outline xmlUrl="https://broken.example/rss" text="Broken"/></outline>
+</body></opml>`;
+  const r = await store.importOPML(opml);
+  globalThis.fetch = realFetch;
+  eq(r.count, 1, 'one valid feed added');
+  eq(r.skipped, 1, 'one broken feed skipped');
+  ok(store.getState().feeds.some((f) => f.url === 'https://good.example/rss'), 'valid feed subscribed');
+  ok(!store.getState().feeds.some((f) => f.url === 'https://broken.example/rss'), 'broken feed not subscribed');
 }
 
 console.log(`\n${passes} passed, ${failures} failed\n`);

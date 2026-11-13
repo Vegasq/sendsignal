@@ -400,8 +400,14 @@ export async function importOPML(text) {
       added.skipped++;
       continue;
     }
-    await addFeed(xmlUrl, folder);
-    added.count++;
+    try {
+      await addFeed(xmlUrl, folder);
+      added.count++;
+    } catch {
+      // Broken import (e.g. a proxy returned non-XML content): skip this feed
+      // and continue with the rest of the OPML rather than aborting the batch.
+      added.skipped++;
+    }
   }
   return added;
 }
