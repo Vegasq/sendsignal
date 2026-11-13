@@ -39,6 +39,31 @@ export function buildList(state, view, search) {
 }
 
 /**
+ * Resolve which article a view should show for `selectedKey`, given the current
+ * view list and the selection context carried over from the previous render.
+ *
+ * Auto-mark-read removes the viewed article from the unread-only list, so the
+ * context must persist across renders: while an article is selected but no
+ * longer in `list` (because it was just marked read), reuse its carried context
+ * — row plus captured Previous/Next neighbors — so it stays on screen and
+ * navigation keeps working. A fresh context is captured whenever the row is
+ * still listed.
+ *
+ * @param {Array<{key:string}>} list
+ * @param {string|null} selectedKey
+ * @param {{row:Object, prev:Object|null, next:Object|null}|null} prev context from the last render
+ * @returns {{row:Object, prev:Object|null, next:Object|null}|null}
+ */
+export function selectRow(list, selectedKey, prev) {
+  const idx = selectedKey ? list.findIndex((r) => r.key === selectedKey) : -1;
+  if (idx >= 0) {
+    return { row: list[idx], prev: idx > 0 ? list[idx - 1] : null, next: idx < list.length - 1 ? list[idx + 1] : null };
+  }
+  if (prev && prev.row.key === selectedKey) return prev;
+  return null;
+}
+
+/**
  * Unread counts keyed by feed url, plus synthetic keys "unread" and
  * "folder::<name>" for the sidebar aggregates.
  */

@@ -1,10 +1,15 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useRef } from 'react';
 import { setRead } from '../lib/store.js';
+import { selectRow } from '../lib/view.js';
 import { timeAgo } from '../lib/util.js';
 
 export default function Reader({ state, view, search, list, selectedKey, onSelect, onToggleRead, onOpenOriginal }) {
-  const idx = selectedKey ? list.findIndex((r) => r.key === selectedKey) : -1;
-  const row = idx >= 0 ? list[idx] : null;
+  // Auto-mark-read removes the viewed article from the unread-only list, so the
+  // selection context must persist across renders: keep showing the selected
+  // article (and its Previous/Next neighbors) until selection changes.
+  const selRef = useRef(null);
+  selRef.current = selectRow(list, selectedKey, selRef.current);
+  const { row, prev, next } = selRef.current ?? {};
 
   // Auto-mark the visible article read; keep the checkbox authoritative.
   useEffect(() => {
@@ -18,8 +23,6 @@ export default function Reader({ state, view, search, list, selectedKey, onSelec
 
   const { item, feedUrl } = row;
   const ft = state.feeds.find((f) => f.url === feedUrl)?.title || feedUrl;
-  const prev = idx > 0 ? list[idx - 1] : null;
-  const next = idx < list.length - 1 ? list[idx + 1] : null;
   const key = row.key;
 
   return (

@@ -35,6 +35,7 @@ const db = await import('../src/lib/db.js');
 const store = await import('../src/lib/store.js');
 const refresh = await import('../src/lib/refresh.js');
 const proxy = await import('../src/lib/proxy.js');
+const { selectRow } = await import('../src/lib/view.js');
 
 function makeFeed(url, n) {
   return {
@@ -119,6 +120,21 @@ eq(proxy.getUserProxy(), 'https://proxy.example/fetch?url=${url}', 'template sto
 const mapped = proxy.getUserProxy().replace('${url}', encodeURIComponent('https://itc.ua/ua/feed/'));
 eq(mapped, 'https://proxy.example/fetch?url=https%3A%2F%2Fitc.ua%2Fua%2Ffeed%2F', 'placeholder URL-encoded');
 proxy.setUserProxy('');
+
+console.log('\nselectRow — article stays visible after auto-mark-read');
+// Simulates the Unread tab: list is unread-only, so marking the viewed article
+// read removes it from `list`. selectRow must keep it (and its neighbors) shown.
+const rows = (...keys) => keys.map((k) => ({ key: k }));
+let ctx = selectRow(rows('A', 'B', 'C', 'D'), 'B', null);
+eq([ctx.row.key, ctx.prev?.key, ctx.next?.key], ['B', 'A', 'C'], 'fresh selection captures neighbors');
+ctx = selectRow(rows('A', 'C', 'D'), 'B', ctx); // B marked read -> gone from list
+eq([ctx.row.key, ctx.prev?.key, ctx.next?.key], ['B', 'A', 'C'], 'selected-but-unlisted row kept with neighbors');
+ctx = selectRow(rows('A', 'C', 'D'), 'C', ctx); // move to C (now listed)
+eq([ctx.row.key, ctx.prev?.key, ctx.next?.key], ['C', 'A', 'D'], 'new selection re-captures neighbors');
+ctx = selectRow(rows('A', 'D'), 'C', ctx); // C marked read -> gone
+eq([ctx.row.key, ctx.prev?.key, ctx.next?.key], ['C', 'A', 'D'], 'C kept after leaving list');
+eq(selectRow(rows('A', 'D'), null, ctx), null, 'no selection -> null');
+eq(selectRow([], 'Z', null)?.row?.key ?? null, null, 'missing key -> null');
 
 console.log(`\n${passes} passed, ${failures} failed\n`);
 process.exit(failures ? 1 : 0);
