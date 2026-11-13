@@ -35,7 +35,7 @@ const db = await import('../src/lib/db.js');
 const store = await import('../src/lib/store.js');
 const refresh = await import('../src/lib/refresh.js');
 const proxy = await import('../src/lib/proxy.js');
-const { selectRow } = await import('../src/lib/view.js');
+const { selectRow, buildList } = await import('../src/lib/view.js');
 
 function makeFeed(url, n) {
   return {
@@ -135,6 +135,17 @@ ctx = selectRow(rows('A', 'D'), 'C', ctx); // C marked read -> gone
 eq([ctx.row.key, ctx.prev?.key, ctx.next?.key], ['C', 'A', 'D'], 'C kept after leaving list');
 eq(selectRow(rows('A', 'D'), null, ctx), null, 'no selection -> null');
 eq(selectRow([], 'Z', null)?.row?.key ?? null, null, 'missing key -> null');
+
+console.log('\nbuildList keepRead — driven-list mode keeps read items in Unread');
+await store.ingestFeed('feed://k', makeFeed('feed://k', 3));
+await store.setRead('feed://k::feed://k#1', true);
+const st = store.getState();
+const unreadView = { kind: 'unread', name: null };
+const filtered = buildList(st, unreadView, '', false);
+ok(!filtered.some((r) => r.key === 'feed://k::feed://k#1'), 'unread view drops the read item');
+const kept = buildList(st, unreadView, '', true);
+ok(kept.some((r) => r.key === 'feed://k::feed://k#1'), 'keepRead retains the read item');
+eq(buildList(st, { kind: 'all', name: null }, '', false).length, buildList(st, { kind: 'all', name: null }, '', true).length, 'all view ignores keepRead');
 
 console.log(`\n${passes} passed, ${failures} failed\n`);
 process.exit(failures ? 1 : 0);

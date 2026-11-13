@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   subscribe,
   getState,
@@ -55,7 +55,16 @@ export default function App() {
     };
   }, []);
 
-  const list = useMemo(() => buildList(state, view, search), [state, view, search]);
+  // Driven-list mode: in the Unread tab, keep read items listed until you leave
+  // the tab. keepRead is true only while *continuing* in Unread (the previous
+  // commit was also Unread), so a fresh entry still filters to unread-only.
+  const viewKindRef = useRef(null);
+  useEffect(() => {
+    viewKindRef.current = view.kind;
+  }, [view]);
+  const keepRead = view.kind === 'unread' && viewKindRef.current === 'unread';
+
+  const list = useMemo(() => buildList(state, view, search, keepRead), [state, view, search, keepRead]);
 
   const counts = useMemo(() => unreadCounts(state), [state]);
 
@@ -119,6 +128,7 @@ export default function App() {
         state={state}
         view={view}
         search={search}
+        keepRead={keepRead}
         onSelect={handleSelect}
         onMarkAllRead={handleMarkAllRead}
       />

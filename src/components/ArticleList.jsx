@@ -3,8 +3,8 @@ import { allArticles } from '../lib/store.js';
 import { buildList } from '../lib/view.js';
 import { timeAgo, snippet } from '../lib/util.js';
 
-export default memo(function ArticleList({ state, view, search, onSelect, onMarkAllRead }) {
-  const items = buildList(state, view, search);
+export default memo(function ArticleList({ state, view, search, keepRead, onSelect, onMarkAllRead }) {
+  const items = buildList(state, view, search, keepRead);
 
   if (items.length === 0) {
     return (

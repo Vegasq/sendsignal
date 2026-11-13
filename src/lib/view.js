@@ -8,7 +8,7 @@ import { allArticles } from './store.js';
  * Build the ordered list of rows for the current view.
  * @returns {Array<{key:string, item:object, feedUrl:string, isRead:boolean}>}
  */
-export function buildList(state, view, search) {
+export function buildList(state, view, search, keepRead = false) {
   const feeds = allArticles();
   const q = (search || '').toLowerCase().trim();
   const read = state.read;
@@ -20,13 +20,15 @@ export function buildList(state, view, search) {
         ? feeds.filter((f) => folderOf(state, f.url) === view.name).map((f) => f.url)
         : feeds.map((f) => f.url);
 
+  // Unread view drops read items by default; keepRead (driven-list mode) holds
+  // them until you leave the tab, so reading one doesn't erase it mid-view.
   const onlyUnread = view.kind === 'unread';
   const rows = [];
   for (const feed of feeds.filter((f) => selectedUrls.includes(f.url))) {
     for (const item of feed.items) {
       const key = feed.url + '::' + item.id;
       const isRead = read.has(key);
-      if (onlyUnread && isRead) continue;
+      if (onlyUnread && isRead && !keepRead) continue;
       if (q) {
         const hay = (item.title + ' ' + item.author + ' ' + plain(item.content)).toLowerCase();
         if (!hay.includes(q)) continue;
