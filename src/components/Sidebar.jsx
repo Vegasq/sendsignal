@@ -20,10 +20,6 @@ export default function Sidebar({
   const [menu, setMenu] = useState(null); // { url, x, y }
   const [creating, setCreating] = useState(false); // inline new-folder input
   const [newFolder, setNewFolder] = useState('');
-  // Drag-and-drop: which feed is being dragged, and which drop target is hovered
-  // (folder name, or '' for the Uncategorized zone).
-  const [dragFeedUrl, setDragFeedUrl] = useState(null);
-  const [dropTarget, setDropTarget] = useState(null);
 
   const allUnread = Object.values(unreadCounts).reduce((a, b) => a + b, 0);
 
@@ -39,8 +35,7 @@ export default function Sidebar({
     e.preventDefault();
     const url = e.dataTransfer.getData('text/plain');
     if (url) onMoveFeed(url, folder);
-    setDragFeedUrl(null);
-    setDropTarget(null);
+    e.target.closest('.nav-item')?.classList.remove('drop-active');
   }
 
   return (
@@ -89,14 +84,13 @@ export default function Sidebar({
         )}
         {state.folders.map((folder) => {
           const count = unreadCounts['folder::' + folder] || 0;
-          const isDrop = dropTarget === folder;
           return (
             <div
               key={folder}
-              className={"nav-item drop-target" + (isDrop ? ' drop-active' : '') + (view.kind === 'folder' && view.name === folder ? ' active' : '')}
+              className={"nav-item drop-target" + (view.kind === 'folder' && view.name === folder ? ' active' : '')}
               onClick={() => onView({ kind: 'folder', name: folder })}
-              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTarget(folder); }}
-              onDragLeave={() => { if (dropTarget === folder) setDropTarget(null); }}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.target.closest('.nav-item')?.classList.add('drop-active'); }}
+              onDragLeave={(e) => { e.target.closest('.nav-item')?.classList.remove('drop-active'); }}
               onDrop={(e) => handleDrop(e, folder)}>
               <span className="dot" />
               <span className="label">{folder}</span>
@@ -116,19 +110,18 @@ export default function Sidebar({
         </div>
         {state.feeds.map((feed) => {
           const count = unreadCounts[feed.url] || 0;
-          const isDragged = dragFeedUrl === feed.url;
           return (
             <div
               key={feed.id}
               draggable
-              className={"nav-item" + (view.kind === 'feed' && view.name === feed.url ? ' active' : '') + (count ? ' has-unread' : '') + (isDragged ? ' dragging' : '')}
+              className={"nav-item" + (view.kind === 'feed' && view.name === feed.url ? ' active' : '') + (count ? ' has-unread' : '')}
               onClick={() => onView({ kind: 'feed', name: feed.url })}
               onDragStart={(e) => {
                 e.dataTransfer.setData('text/plain', feed.url);
                 e.dataTransfer.effectAllowed = 'move';
-                setDragFeedUrl(feed.url);
+                e.target.closest('.nav-item')?.classList.add('dragging');
               }}
-              onDragEnd={() => { setDragFeedUrl(null); setDropTarget(null); }}
+              onDragEnd={(e) => { e.target.closest('.nav-item')?.classList.remove('dragging'); }}
               onContextMenu={(e) => { e.preventDefault(); setMenu({ url: feed.url, x: e.clientX, y: e.clientY }); }}
               title={feed.url}>
               <span className="dot" />
@@ -145,9 +138,9 @@ export default function Sidebar({
           </div>
         )}
         <div
-          className={"nav-item subtle drop-target" + (dropTarget === '' ? ' drop-active' : '')}
-          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropTarget(''); }}
-          onDragLeave={() => { if (dropTarget === '') setDropTarget(null); }}
+          className={"nav-item subtle drop-target"}
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.target.closest('.nav-item')?.classList.add('drop-active'); }}
+          onDragLeave={(e) => { e.target.closest('.nav-item')?.classList.remove('drop-active'); }}
           onDrop={(e) => handleDrop(e, '')}
           title="Drop a feed here to remove it from its folder">
           <span className="dot" />

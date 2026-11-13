@@ -147,5 +147,18 @@ const kept = buildList(st, unreadView, '', true);
 ok(kept.some((r) => r.key === 'feed://k::feed://k#1'), 'keepRead retains the read item');
 eq(buildList(st, { kind: 'all', name: null }, '', false).length, buildList(st, { kind: 'all', name: null }, '', true).length, 'all view ignores keepRead');
 
+console.log('\nmoveFeed — a feed dragged into a folder surfaces in that folder view');
+await store.ingestFeed('feed://m1', makeFeed('feed://m1', 2));
+await store.ingestFeed('feed://m2', makeFeed('feed://m2', 2));
+store.createFolder('News');
+eq(store.getState().feeds.find((f) => f.url === 'feed://m1').folder, '', 'new feed starts uncategorized');
+store.moveFeed('feed://m1', 'News');
+eq(store.getState().feeds.find((f) => f.url === 'feed://m1').folder, 'News', 'moveFeed sets the feed folder');
+eq(store.getState().feeds.find((f) => f.url === 'feed://m2').folder, '', 'other feed stays uncategorized');
+const st2 = store.getState();
+const folderRows = buildList(st2, { kind: 'folder', name: 'News' }, '', false);
+eq(folderRows.filter((r) => r.feedUrl === 'feed://m1').length, 2, 'folder view lists that feed items');
+eq(folderRows.some((r) => r.feedUrl === 'feed://m2'), false, 'other feed excluded from the folder view');
+
 console.log(`\n${passes} passed, ${failures} failed\n`);
 process.exit(failures ? 1 : 0);
